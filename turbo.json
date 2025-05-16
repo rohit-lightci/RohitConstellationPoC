@@ -1,0 +1,39 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": ["**/.env.*local"],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
+    },
+    "lint": {},
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "test": {
+      "dependsOn": ["build"]
+    },
+    "cdk": {
+      "cache": false
+    },
+    "synth": {
+      "dependsOn": ["build"],
+      "outputs": ["cdk.out/**"]
+    },
+    "deploy": {
+      "dependsOn": ["build", "synth"],
+      "cache": false
+    },
+    "diff": {
+      "dependsOn": ["build"],
+      "cache": false
+    },
+    "bootstrap": {
+      "cache": false
+    },
+    "destroy": {
+      "cache": false
+    }
+  }
+}

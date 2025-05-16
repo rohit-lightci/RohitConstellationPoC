@@ -1,0 +1,15 @@
+{
+    "environment": "development",
+    "stackName": "custom-stack-name",
+    "datadogApiKeySecretArn": "arn:aws:secretsmanager:us-east-1:597610889212:secret:datadog-api-key-coOWfY",
+    "vpcId": "vpc-0587bce4face422f4",
+    "domain": {
+        "zoneName": "lciventurestudio.com",
+        "hostedZoneId": "Z0102213C0GFHHIH2UQP",
+        "domainName": "custom-domain.lciventurestudio.com",
+        "sslCertArn": "arn:aws:acm:us-east-1:597610889212:certificate/47beb03a-f160-434e-a134-12a234a6dc44"
+    },
+    "database": {
+        "name": "app_db"
+    }
+}
