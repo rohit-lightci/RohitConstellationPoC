@@ -5,6 +5,7 @@ export interface CardProps {
   className?: string
   padding?: 'none' | 'sm' | 'md' | 'lg'
   variant?: 'elevated' | 'outlined' | 'filled'
+  onClick?: () => void
 }
 
 export const Card: React.FC<CardProps> = ({
@@ -12,6 +13,7 @@ export const Card: React.FC<CardProps> = ({
   className = '',
   padding = 'md',
   variant = 'elevated',
+  onClick,
   ...props
 }) => {
   const baseStyles = 'rounded-lg'
@@ -32,6 +34,7 @@ export const Card: React.FC<CardProps> = ({
   return (
     <div
       className={`${baseStyles} ${variantStyles[variant]} ${paddingStyles[padding]} ${className}`}
+      onClick={onClick}
       {...props}
     >
       {children}
