@@ -1,8 +1,36 @@
 import React from 'react';
 import { Card } from './Card';
 import { Button } from './Button';
+import type { SessionData } from './SessionStepper';
 
-export const LaunchStep: React.FC<{ onBack: () => void; onContinue: () => void }> = ({ onBack, onContinue }) => {
+const API_URL = 'http://localhost:3000/v1';
+
+export const LaunchStep: React.FC<{ onBack: () => void; onContinue: () => void; sessionData: SessionData }> = ({ onBack, onContinue, sessionData }) => {
+  const [loading, setLoading] = React.useState(false);
+
+  const handleLaunch = async () => {
+    setLoading(true);
+    try {
+      console.log('Sending session data to API:', sessionData);
+      const response = await fetch(`${API_URL}/sessions/create`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sessionData),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        alert('Session created! ID: ' + data.sessionId);
+        onContinue();
+      } else {
+        alert('Failed to create session');
+      }
+    } catch (e) {
+      alert('Error creating session');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="max-w-2xl mx-auto py-10">
       <div className="flex items-center justify-between mb-8">
@@ -36,7 +64,7 @@ export const LaunchStep: React.FC<{ onBack: () => void; onContinue: () => void }
             <span className="font-semibold">Your session is ready to launch!</span> You can launch your session now or schedule it for later.
           </div>
           <div className="flex space-x-4 mb-4 justify-center">
-            <button className="px-6 py-2 rounded bg-blue-600 text-white font-semibold" onClick={onContinue}>Launch Now</button>
+            <button className="px-6 py-2 rounded bg-blue-600 text-white font-semibold" onClick={handleLaunch} disabled={loading}>Launch Now</button>
             <button className="px-6 py-2 rounded bg-gray-200 text-gray-700 font-semibold" disabled>Schedule for Later</button>
           </div>
           <div className="mb-4">
@@ -53,8 +81,8 @@ export const LaunchStep: React.FC<{ onBack: () => void; onContinue: () => void }
           </div>
         </div>
         <div className="flex justify-between">
-          <Button variant="secondary" size="md" onClick={onBack}>Back</Button>
-          <Button variant="primary" size="md" onClick={onContinue}>Launch Session Now</Button>
+          <Button variant="secondary" size="md" onClick={onBack} disabled={loading}>Back</Button>
+          <Button variant="primary" size="md" onClick={handleLaunch} disabled={loading}>Launch Session Now</Button>
         </div>
       </Card>
     </div>

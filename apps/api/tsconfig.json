@@ -19,8 +19,9 @@
         "strictBindCallApply": false,
         "forceConsistentCasingInFileNames": false,
         "noFallthroughCasesInSwitch": false,
-        "esModuleInterop": true
+        "esModuleInterop": true,
+        "strictPropertyInitialization": false
     },
-    "include": ["src/**/*", "test/**/*"],
+    "include": ["src/**/*", "scripts/**/*", "test/**/*", "typeorm.config.ts"],
     "exclude": ["node_modules", "dist", "build"]
 }

@@ -18,7 +18,7 @@ const templateOptions = [
 ];
 
 export const SessionSetup: React.FC<{
-  onContinue?: (data: { template: string; title: string }) => void;
+  onContinue?: (data: { template: string; title: string; duration: number }) => void;
   data: SessionData;
   setData: React.Dispatch<React.SetStateAction<SessionData>>;
 }> = ({ onContinue, data, setData }) => {
@@ -29,7 +29,7 @@ export const SessionSetup: React.FC<{
   const handleContinue = () => {
     setHasAttemptedContinue(true);
     if (canContinue) {
-      onContinue?.({ template: data.template!, title: data.title! });
+      onContinue?.({ template: data.template!, title: data.title!, duration: data.duration || 60 });
     }
   };
 

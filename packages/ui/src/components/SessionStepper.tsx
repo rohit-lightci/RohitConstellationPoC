@@ -31,13 +31,10 @@ export const SessionStepper: React.FC = () => {
     },
   });
   const [participantStep, setParticipantStep] = useState(false);
-  const [participantName, setParticipantName] = useState('');
-  const [participantRole, setParticipantRole] = useState('');
-  const [participantSubmitted, setParticipantSubmitted] = useState(false);
-
+  
   // Handlers to update session data from each step
-  const handleSessionSetupContinue = (data: { template: string; title: string }) => {
-    setSessionData((prev) => ({ ...prev, template: data.template, title: data.title }));
+  const handleSessionSetupContinue = (data: { template: string; title: string; duration: number }) => {
+    setSessionData((prev) => ({ ...prev, template: data.template, title: data.title, duration: data.duration }));
     setStep(1);
   };
 
@@ -65,14 +62,7 @@ export const SessionStepper: React.FC = () => {
       )}
       {/* Participant join page */}
       {participantStep && (
-        <JoinSession
-          name={participantName}
-          role={participantRole}
-          setName={setParticipantName}
-          setRole={setParticipantRole}
-          submitted={participantSubmitted}
-          setSubmitted={setParticipantSubmitted}
-        />
+        <JoinSession/>
       )}
       {/* Main session flow */}
       {!participantStep && (
@@ -100,7 +90,7 @@ export const SessionStepper: React.FC = () => {
             />
           )}
           {step === 3 && (
-            <LaunchStep onBack={() => setStep(2)} onContinue={handleLaunchContinue} />
+            <LaunchStep onBack={() => setStep(2)} onContinue={handleLaunchContinue} sessionData={sessionData} />
           )}
           {step === 4 && (
             <div className="max-w-4xl mx-auto py-10">

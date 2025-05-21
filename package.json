@@ -17,7 +17,9 @@
     "test": "turbo run test",
     "prepare": "husky",
     "lint-staged": "lint-staged",
-    "cdk": "pnpm --filter infrastructure cdk"
+    "cdk": "pnpm --filter infrastructure cdk",
+    "db:up": "docker-compose up -d postgres",
+    "db:down": "docker-compose down"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [
