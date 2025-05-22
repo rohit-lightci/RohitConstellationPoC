@@ -254,7 +254,7 @@ export const SessionStepper: React.FC = () => {
                   <div className="font-bold text-lg mb-1">Ready to Start?</div>
                   <div className="text-gray-500 text-sm">
                     {sessionState?.participants.length ? 
-                      `${sessionState.participants.length} participants have joined.` :
+                      `${sessionState.participants.filter(p => p.status === 'ACTIVE')?.length} participants have joined.` :
                       'Waiting for participants to join...'}
                   </div>
                 </div>

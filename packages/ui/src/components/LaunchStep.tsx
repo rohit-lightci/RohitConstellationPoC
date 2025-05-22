@@ -35,14 +35,13 @@ export const LaunchStep: React.FC<{ onBack: () => void; onContinue: () => void; 
         body: JSON.stringify(sessionDto),
       });
       if (response.ok) {
-        const data = await response.json();
-        alert('Session created! ID: ' + data.sessionId);
+        await response.json();
         onContinue();
       } else {
-        alert('Failed to create session');
+        console.error('Failed to create session');
       }
     } catch (e) {
-      alert('Error creating session');
+      console.error('Error creating session');
     } finally {
       setLoading(false);
     }

@@ -187,7 +187,7 @@ export class SessionService {
 
     const participant = session.participants.find(p => p.id === participantId);
     if (!participant) {
-      throw new Error('Participant not found');
+      console.log('Participant not found', participantId);
     }
 
     participant.status = status;
