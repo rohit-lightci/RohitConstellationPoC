@@ -2,6 +2,7 @@ import React from 'react';
 import { Card } from './Card';
 import { Button } from './Button';
 import type { SessionData } from './SessionStepper';
+import { CreateSessionDto } from '@rohit-constellation/types';
 
 const API_URL = 'http://localhost:3000/v1';
 
@@ -11,11 +12,27 @@ export const LaunchStep: React.FC<{ onBack: () => void; onContinue: () => void; 
   const handleLaunch = async () => {
     setLoading(true);
     try {
-      console.log('Sending session data to API:', sessionData);
-      const response = await fetch(`${API_URL}/sessions/create`, {
+      // create sessionDto
+      const sessionDto: CreateSessionDto = {
+        template: 'retro',
+        title: sessionData.title,
+        type: 'RETRO',
+        globalTimeLimit: sessionData.duration,
+        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
+        createdBy: 'admin',
+        isAnonymous: false,
+        participationRule: 'all',
+        description: '',
+        permissions: {
+          askQuestions: true,
+          reactUpvote: true,
+          seeResponses: true
+        }
+      };
+      const response = await fetch(`${API_URL}/sessions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sessionData),
+        body: JSON.stringify(sessionDto),
       });
       if (response.ok) {
         const data = await response.json();

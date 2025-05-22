@@ -7,9 +7,9 @@ import { JoinSession } from './JoinSession';
 
 export interface SessionData {
   template?: string;
-  title?: string;
+  title: string;
   description?: string;
-  duration?: number;
+  duration: number;
   anonymous?: boolean;
   participationRule?: string;
   permissions?: {
@@ -23,6 +23,8 @@ export interface SessionData {
 export const SessionStepper: React.FC = () => {
   const [step, setStep] = useState(0);
   const [sessionData, setSessionData] = useState<SessionData>({
+    title: '',
+    duration: 0,
     anonymous: true,
     permissions: {
       askQuestions: true,
