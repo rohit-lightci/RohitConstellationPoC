@@ -1,9 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { SectionType } from '@rohit-constellation/types';
+import { SectionType, ParticipantStatus, SectionStatus } from '@rohit-constellation/types';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 
+import { SessionEventsService } from './session-events.service';
 import { CreateSessionDto } from './session.dto';
 import { Session } from './session.entity';
 
@@ -14,6 +15,7 @@ export class SessionService {
   constructor(
     @InjectRepository(Session)
     private sessionRepository: Repository<Session>,
+    private eventsService: SessionEventsService,
   ) {}
 
   private createBaseQuestions(sectionType: SectionType) {
@@ -53,17 +55,21 @@ export class SessionService {
   async createSession(dto: CreateSessionDto): Promise<Session> {
     console.log('Creating session with dto:', dto);
     const session = new Session();
+    
+    // Set all fields from DTO
     session.title = dto.title;
     session.template = dto.template;
     session.description = dto.description;
-    session.participationRule = dto.participationRule;
-    session.permissions = dto.permissions;
     session.type = dto.type;
-    session.status = 'DRAFT';
     session.globalTimeLimit = dto.globalTimeLimit;
-    session.expiresAt = dto.expiresAt;
+    session.expiresAt = dto?.expiresAt ?? new Date(new Date().setDate(new Date().getDate() + 1));
     session.createdBy = dto.createdBy;
     session.isAnonymous = dto.isAnonymous;
+    session.participationRule = dto.participationRule;
+    session.permissions = dto.permissions;
+
+    // Set default values
+    session.status = 'DRAFT';
     session.participants = [];
     session.sections = this.createRetroSections();
 
@@ -117,7 +123,18 @@ export class SessionService {
     }
 
     session.status = 'ACTIVE';
-    return this.sessionRepository.save(session);
+    const updatedSession = await this.sessionRepository.save(session);
+    
+    // Emit session status change
+    await this.eventsService.emitSessionStatus(id, 'ACTIVE');
+    
+    // Emit section status for the first section
+    if (session.sections.length > 0) {
+      const firstSection = session.sections[0];
+      await this.eventsService.emitSectionStatus(id, firstSection.id, 'ACTIVE');
+    }
+
+    return updatedSession;
   }
 
   async addParticipant(sessionId: string, name: string): Promise<Session> {
@@ -137,6 +154,90 @@ export class SessionService {
     };
 
     session.participants.push(participant);
-    return this.sessionRepository.save(session);
+    const updatedSession = await this.sessionRepository.save(session);
+
+    // Emit participant status
+    await this.eventsService.emitParticipantStatus(
+      sessionId,
+      participant.id,
+      'ACTIVE'
+    );
+
+    // If session is active, emit the first question
+    if (session.status === 'ACTIVE' && session.sections[0]?.questions[0]) {
+      await this.eventsService.emitQuestionReady(
+        sessionId,
+        participant.id,
+        session.sections[0].questions[0]
+      );
+    }
+
+    return updatedSession;
+  }
+
+  async updateParticipantStatus(
+    sessionId: string,
+    participantId: string,
+    status: ParticipantStatus
+  ): Promise<Session> {
+    const session = await this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    const participant = session.participants.find(p => p.id === participantId);
+    if (!participant) {
+      throw new Error('Participant not found');
+    }
+
+    participant.status = status;
+    if (status === 'COMPLETED') {
+      participant.completedAt = new Date();
+    }
+
+    const updatedSession = await this.sessionRepository.save(session);
+    
+    // Emit participant status change
+    await this.eventsService.emitParticipantStatus(
+      sessionId,
+      participantId,
+      status
+    );
+
+    return updatedSession;
+  }
+
+  async updateSectionStatus(
+    sessionId: string,
+    sectionId: string,
+    status: SectionStatus
+  ): Promise<Session> {
+    const session = await this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    const section = session.sections.find(s => s.id === sectionId);
+    if (!section) {
+      throw new Error('Section not found');
+    }
+
+    section.status = status;
+    if (status === 'ACTIVE') {
+      section.startedAt = new Date();
+    } else if (status === 'COMPLETED') {
+      section.completedAt = new Date();
+    }
+
+    const updatedSession = await this.sessionRepository.save(session);
+    
+    // Emit section status change
+    await this.eventsService.emitSectionStatus(
+      sessionId,
+      sectionId,
+      status
+    );
+
+    return updatedSession;
   }
 }

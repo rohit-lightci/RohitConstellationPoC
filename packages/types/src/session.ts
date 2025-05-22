@@ -7,14 +7,22 @@ export type QuestionType = 'TEXT' | 'RATING' | 'MULTIPLE_CHOICE' | 'AGREE_DISAGR
 
 export interface Session {
   id: string;
+  template: string;
   title: string;
+  description?: string;
   type: SessionType;
   status: SessionStatus;
   globalTimeLimit: number;  // in minutes
   createdAt: Date;
   expiresAt: Date;
-  createdBy: string;  // admin idz
+  createdBy: string;  // admin id
   isAnonymous: boolean;
+  participationRule: string;
+  permissions: {
+    askQuestions: boolean;
+    reactUpvote: boolean;
+    seeResponses: boolean;
+  };
   participants: Participant[];
   sections: Section[];
 }
@@ -70,14 +78,14 @@ export interface QuestionResponse {
 // DTOs for creating/updating sessions
 export interface CreateSessionDto {
   template: string;
-  description: string;
   title: string;
+  description?: string;
   type: SessionType;
   globalTimeLimit: number;
   expiresAt: Date;
+  createdBy: string;
   isAnonymous: boolean;
   participationRule: string;
-  createdBy: string;
   permissions: {
     askQuestions: boolean;
     reactUpvote: boolean;
@@ -130,6 +138,25 @@ export interface ParticipantProgress {
 }
 
 // WebSocket event types
+export interface SessionParticipant {
+  id: string;
+  name: string;
+  role: string;
+  isHost: boolean;
+  status?: ParticipantStatus;
+}
+
+export interface SessionState {
+  id: string;
+  status: 'waiting' | 'active' | 'ended';
+  participants: SessionParticipant[];
+  currentQuestion?: {
+    id: string;
+    text: string;
+    type: string;
+  };
+}
+
 export interface SessionEvents {
   'question:ready': {
     sessionId: string;

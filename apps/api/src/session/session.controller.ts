@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
+import { ParticipantStatus, SectionStatus } from '@rohit-constellation/types';
 
 import { CreateSessionDto } from './session.dto';
 import { SessionService } from './session.service';
@@ -29,5 +30,31 @@ export class SessionController {
     @Body() body: { name: string }
   ) {
     return this.sessionService.addParticipant(id, body.name);
+  }
+
+  @Put(':sessionId/participants/:participantId/status')
+  updateParticipantStatus(
+    @Param('sessionId') sessionId: string,
+    @Param('participantId') participantId: string,
+    @Body() body: { status: ParticipantStatus }
+  ) {
+    return this.sessionService.updateParticipantStatus(
+      sessionId,
+      participantId,
+      body.status
+    );
+  }
+
+  @Put(':sessionId/sections/:sectionId/status')
+  updateSectionStatus(
+    @Param('sessionId') sessionId: string,
+    @Param('sectionId') sectionId: string,
+    @Body() body: { status: SectionStatus }
+  ) {
+    return this.sessionService.updateSectionStatus(
+      sessionId,
+      sectionId,
+      body.status
+    );
   }
 } 
