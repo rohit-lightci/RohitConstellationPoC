@@ -1,5 +1,7 @@
-import { ParticipantStatus, QuestionType, SectionStatus, SectionType, SessionStatus, SessionType } from '@rohit-constellation/types';
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn } from 'typeorm';
+import { Participant, Section, SessionStatus, SessionType as ConstellationSessionType } from '@rohit-constellation/types';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from 'typeorm';
+
+import { Answer } from '../answer/answer.entity';
 
 @Entity()
 export class Session {
@@ -19,7 +21,7 @@ export class Session {
     enum: ['RETRO'],
     default: 'RETRO'
   })
-  type: SessionType;
+  type: ConstellationSessionType;
 
   @Column({
     type: 'enum',
@@ -48,58 +50,18 @@ export class Session {
   
 
   @Column('jsonb')
-  permissions: { // participant permissions
+  permissions: {
     askQuestions: boolean;
     reactUpvote: boolean;
     seeResponses: boolean;
   };
 
   @Column('jsonb', { default: [] })
-  participants: {
-    id: string;
-    name: string;
-    role: 'PARTICIPANT' | 'HOST';
-    status: ParticipantStatus;
-    currentSection: string;
-    currentQuestion: string;
-    joinedAt: Date;
-    completedAt?: Date;
-  }[];
+  participants: Participant[];
 
   @Column('jsonb', { default: [] })
-  sections: {
-    id: string;
-    type: SectionType;
-    timeLimit: number;
-    status: SectionStatus;
-    questions: {
-      id: string;
-      type: QuestionType;
-      text: string;
-      sectionId: string;
-      order: number;
-      isBaseQuestion: boolean;
-      parentQuestionId?: string;
-      options?: string[];
-      minRating?: number;
-      maxRating?: number;
-    }[];
-    startedAt?: Date;
-    completedAt?: Date;
-  }[];
+  sections: Section[];
 
-  @Column('jsonb', { default: [] })
-  answers: {
-    id: string;
-    questionId: string;
-    participantId: string;
-    sessionId: string;
-    response: string | number;
-    createdAt: Date;
-    evaluation?: {
-      isSufficient: boolean;
-      score?: number;
-      feedback?: string;
-    };
-  }[];
+  @OneToMany(() => Answer, answer => answer.session, { cascade: true, eager: false })
+  answers: Answer[];
 }

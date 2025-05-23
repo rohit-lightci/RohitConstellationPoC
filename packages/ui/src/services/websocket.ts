@@ -219,8 +219,21 @@ class WebSocketService {
     this.socket?.emit(SESSION_EVENT.QUESTION_NEXT);
   }
 
-  submitAnswer(questionId: string, answer: any, participantId: string) {
-    this.socket?.emit(SESSION_EVENT.QUESTION_ANSWER, { questionId, answer, participantId });
+  submitAnswer(questionId: string, answer: any, participantId: string): Promise<{ status: string; answerId?: string; message?: string }> {
+    return new Promise((resolve, reject) => {
+      if (!this.socket) {
+        return reject(new Error('Socket not connected'));
+      }
+      this.socket.emit(SESSION_EVENT.QUESTION_ANSWER, { questionId, answer, participantId }, (response: { status: string; answerId?: string; message?: string }) => {
+        if (response && response.status === 'received') {
+          console.log('Answer submission acknowledged by server:', response);
+          resolve(response);
+        } else {
+          console.error('Answer submission failed or not acknowledged properly:', response);
+          reject(response || new Error('Answer submission failed'));
+        }
+      });
+    });
   }
 
   // Cleanup

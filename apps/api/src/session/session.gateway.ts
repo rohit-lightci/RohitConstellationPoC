@@ -383,7 +383,8 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
   ) {
     const sessionId = client.handshake.query.sessionId as string;
     if (!sessionId) {
-      console.error('No sessionId found in handshake query');
+      console.error('No sessionId found in handshake query for QUESTION_ANSWER');
+      client.emit('error', 'Session ID not found for processing answer.');
       return { status: 'error', message: 'Session ID not found in connection.' };
     }
 
@@ -391,29 +392,39 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
     if (!participantId) {
       console.error('No participantId received in QUESTION_ANSWER payload');
+      client.emit('error', 'Participant ID is missing for processing answer.');
       return { status: 'error', message: 'Participant ID is missing in the request.' };
     }
 
     try {
-      console.log(`Received answer from participant ${participantId} for question ${questionId} in session ${sessionId}`);
+      console.log(`Processing answer from participant ${participantId} for question ${questionId} in session ${sessionId}`);
+      
+      // Call the simplified service method
       const savedAnswer = await this.sessionService.submitAnswer(
         sessionId,
         participantId,
         questionId,
         answer,
       );
-      console.log('Answer saved:', savedAnswer);
+      
+      console.log('Answer successfully saved:', savedAnswer);
 
-      // For now, just acknowledge. Later, we'll send the next question.
-      // this.server.to(`session:${sessionId}`).emit(SESSION_EVENT.NEW_ANSWER, savedAnswer); 
-      // TODO: Determine next question and emit SESSION_EVENT.QUESTION_READY
+      // Emit an event to notify that a new answer has been submitted (e.g., for admin or to update UI if answers are public)
+      // This event is different from QUESTION_READY or ALL_QUESTIONS_COMPLETED.
+      // Let's define a new event for this, e.g., SESSION_EVENT.NEW_ANSWER_SUBMITTED
+      // For now, we will assume the client that submitted the answer gets an ack, 
+      // and other clients might listen for a more general new answer event.
+      // this.server.to(`session:${sessionId}`).emit(SESSION_EVENT.NEW_ANSWER_SUBMITTED, savedAnswer);
 
+      // Acknowledge successful processing to the sender
       return { status: 'received', answerId: savedAnswer.id };
+
     } catch (error) {
-      console.error('Error processing answer:', error);
+      console.error(`Error processing answer for participant ${participantId} in session ${sessionId}:`, error);
+      client.emit('error', `Failed to process answer: ${error instanceof Error ? error.message : 'Unknown error'}`);
       return { 
-        status: 'error', 
-        message: error instanceof Error ? error.message : 'Failed to process answer.' 
+        status: 'error',
+        message: error instanceof Error ? error.message : 'Failed to process answer.', 
       };
     }
   }

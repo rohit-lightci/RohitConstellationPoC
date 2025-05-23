@@ -41,6 +41,7 @@ export interface Participant {
 export interface Section {
   id: string;
   type: SectionType;
+  order: number;
   timeLimit: number;  // 10 minutes
   status: SectionStatus;
   questions: Question[];
@@ -175,6 +176,10 @@ export interface SessionEvents {
     sectionId: string;
     status: SectionStatus;
   };
+  'session:participant:all_questions_completed': {
+    sessionId: string;
+    participantId: string;
+  };
 }
 
 export const SESSION_EVENT = {
@@ -190,6 +195,7 @@ export const SESSION_EVENT = {
   QUESTION_NEXT: 'session:question:next',
   QUESTION_ANSWER: 'session:question:answer',
   GET_QUESTION: 'session:get:question',
+  ALL_QUESTIONS_COMPLETED: 'session:participant:all_questions_completed',
   // Add more as needed
 } as const;
 
