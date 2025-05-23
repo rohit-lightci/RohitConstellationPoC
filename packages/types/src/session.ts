@@ -30,7 +30,7 @@ export interface Session {
 export interface Participant {
   id: string;
   name: string;
-  role: 'PARTICIPANT';
+  role: 'PARTICIPANT' | 'HOST';
   status: ParticipantStatus;
   currentSection: string;  // section id
   currentQuestion: string;  // question id
@@ -148,7 +148,7 @@ export interface SessionParticipant {
 
 export interface SessionState {
   id: string;
-  status: 'waiting' | 'active' | 'ended';
+  status: SessionStatus;
   participants: SessionParticipant[];
   currentQuestion?: {
     id: string;
@@ -157,12 +157,14 @@ export interface SessionState {
   };
 }
 
+export interface QuestionReadyEvent {
+  sessionId: string;
+  participantId: string;
+  question: Question;
+}
+
 export interface SessionEvents {
-  'question:ready': {
-    sessionId: string;
-    participantId: string;
-    question: Question;
-  };
+  'question:ready': QuestionReadyEvent;
   'participant:status': {
     sessionId: string;
     participantId: string;
@@ -173,8 +175,22 @@ export interface SessionEvents {
     sectionId: string;
     status: SectionStatus;
   };
-  'session:status': {
-    sessionId: string;
-    status: SessionStatus;
-  };
-} 
+}
+
+export const SESSION_EVENT = {
+  START: 'session:start',
+  PARTICIPANT_STATUS: 'participant:status',
+  PARTICIPANT_JOINED: 'session:participant:joined',
+  PARTICIPANT_LEFT: 'session:participant:left',
+  SECTION_STATUS: 'section:status',
+  STATE: 'session:state',
+  LEAVE: 'session:leave',
+  END: 'session:end',
+  QUESTION_READY: 'question:ready',
+  QUESTION_NEXT: 'session:question:next',
+  QUESTION_ANSWER: 'session:question:answer',
+  GET_QUESTION: 'session:get:question',
+  // Add more as needed
+} as const;
+
+export type SessionEventName = typeof SESSION_EVENT[keyof typeof SESSION_EVENT]; 

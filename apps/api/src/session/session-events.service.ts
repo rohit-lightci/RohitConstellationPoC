@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
-import { ParticipantStatus, SectionStatus, SessionStatus } from '@rohit-constellation/types';
+import { ParticipantStatus, SectionStatus } from '@rohit-constellation/types';
 import { Server } from 'socket.io';
 
 @Injectable()
@@ -35,13 +35,6 @@ export class SessionEventsService {
     this.server.to(`session:${sessionId}`).emit('section:status', {
       sessionId,
       sectionId,
-      status,
-    });
-  }
-
-  async emitSessionStatus(sessionId: string, status: SessionStatus) {
-    this.server.to(`session:${sessionId}`).emit('session:status', {
-      sessionId,
       status,
     });
   }

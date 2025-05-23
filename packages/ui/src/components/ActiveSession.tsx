@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { websocketService } from '../services/websocket';
-import { SessionState } from '@rohit-constellation/types';
+import { Question, SESSION_EVENT, SessionState } from '@rohit-constellation/types';
+import { useSession } from '../context/SessionContext';
 
 interface Answer {
   id: string;
@@ -20,6 +21,17 @@ export const ActiveSession: React.FC = () => {
   const [currentAnswer, setCurrentAnswer] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(false);
+  const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null);
+  const { participantId, setParticipantId } = useSession();
+
+  // Set participantId from localStorage if not set
+  useEffect(() => {
+    if (!participantId) {
+      setParticipantId(JSON.parse(localStorage.getItem("session_participant") || "{}").id);
+    }
+  }, [participantId]);
+
+
 
   useEffect(() => {
     if (!sessionId) {
@@ -27,13 +39,14 @@ export const ActiveSession: React.FC = () => {
       return;
     }
 
-    // Connect to WebSocket
+    // Connect to WebSocket only once
     websocketService.connect(sessionId);
 
     // Set up event listeners
     websocketService.onSessionStateUpdate((state) => {
+      console.log('Session state update received:', state);
       setSessionState(state);
-      if (state.status === 'ended') {
+      if (state.status === 'COMPLETED') {
         // Navigate to results view when session ends
         navigate(`/session/${sessionId}/results`);
       }
@@ -49,18 +62,41 @@ export const ActiveSession: React.FC = () => {
       setAnswers(prev => prev.map(a => a.id === updatedAnswer.id ? updatedAnswer : a));
     });
 
+    websocketService.onQuestionReady(({ question }) => {
+      console.log('Question ready received:', question);
+      setCurrentQuestion(question);
+    });
+
     // Cleanup
     return () => {
       websocketService.removeAllListeners();
-      websocketService.disconnect();
     };
   }, [sessionId, navigate]);
 
-  const handleSubmitAnswer = () => {
-    if (!currentAnswer.trim() || !sessionState?.currentQuestion) return;
+  // Separate effect for getting questions
+  useEffect(() => {
+    if (!sessionId || !participantId) {
+      console.log('No sessionId or participantId', sessionId, participantId);
+      return;
+    }
+    
+    // Only emit get question event, don't connect again
+    console.log('Emitting get question event for participant:', participantId);
+    websocketService.emit(SESSION_EVENT.GET_QUESTION, { sessionId, participantId });
+  }, [sessionId, participantId]);
 
+  const handleSubmitAnswer = () => {
+    console.log('Current answer:', currentAnswer);
+    console.log('Current question from state:', currentQuestion);
+    console.log('Participant ID:', participantId);
+    if (!currentAnswer.trim() || !currentQuestion?.id || !participantId) {
+      console.log('Submit Answer Check Failed:', { currentAnswer, currentQuestion, participantId });
+      return;
+    }
+    
+    console.log('Submitting answer for question:', currentQuestion.id, 'by participant:', participantId);
     try {
-      websocketService.submitAnswer(sessionState.currentQuestion.id, currentAnswer);
+      websocketService.submitAnswer(currentQuestion.id, currentAnswer, participantId);
       setCurrentAnswer('');
     } catch (err) {
       setError('Failed to submit answer. Please try again.');
@@ -93,6 +129,7 @@ export const ActiveSession: React.FC = () => {
   }
 
   if (!sessionState) {
+    console.log('No session state', sessionState);
     return (
       <div className="max-w-4xl mx-auto py-10">
         <div className="bg-white rounded-lg shadow p-8">
@@ -107,7 +144,7 @@ export const ActiveSession: React.FC = () => {
       <div className="bg-white rounded-lg shadow p-8 mb-8">
         <div className="flex justify-between items-start mb-6">
           <div>
-            <h1 className="text-2xl font-bold mb-2">{sessionState.currentQuestion?.text}</h1>
+            <h1 className="text-2xl font-bold mb-2">{currentQuestion?.text}</h1>
             <div className="text-sm text-gray-500">
               {sessionState.participants.length} participants • {answers.length} answers
             </div>

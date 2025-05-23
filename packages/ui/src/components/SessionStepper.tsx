@@ -4,9 +4,9 @@ import { SessionSetup } from './SessionSetup';
 import { ParticipationStep } from './ParticipationStep';
 import { PreviewStep } from './PreviewStep';
 import { LaunchStep } from './LaunchStep';
-import { JoinSession } from './JoinSession';
 import { websocketService } from '../services/websocket';
 import { SessionState } from '@rohit-constellation/types';
+import { WaitingLobby } from './WaitingLobby';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/v1';
 
@@ -39,7 +39,6 @@ export const SessionStepper: React.FC = () => {
       seeResponses: true,
     },
   });
-  const [participantStep, setParticipantStep] = useState(false);
   const [sessionState, setSessionState] = useState<SessionState | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
@@ -47,15 +46,11 @@ export const SessionStepper: React.FC = () => {
   useEffect(() => {
     if (sessionId) {
       websocketService.connect(sessionId);
-      websocketService.joinSession('Admin', 'HOST');
+      websocketService.joinSession('Admin', 'HOST'); // send an join event and store the participant id in local storage
 
       websocketService.onSessionStateUpdate((state) => {
         console.log('Session state updated received:', state);
         setSessionState(state);
-        if (state.status === 'active') {
-          // Navigate to active session view when session starts
-          navigate(`/session/${sessionId}/active`);
-        }
       });
 
       websocketService.onParticipantJoined((participant) => {
@@ -67,7 +62,7 @@ export const SessionStepper: React.FC = () => {
         websocketService.disconnect();
       };
     }
-  }, [sessionId, navigate]);
+  }, [sessionId]);
 
   // Handlers to update session data from each step
   const handleSessionSetupContinue = async (data: { template: string; title: string; duration: number }) => {
@@ -80,11 +75,9 @@ export const SessionStepper: React.FC = () => {
     }
   };
 
-  const handleParticipationContinue = async () => {
+
+  const createSession = async () => {
     try {
-      // Create session using the API with all collected data
-      console.log('Creating session with data:', sessionData);
-      console.log('API_URL:', API_URL);
       const response = await fetch(`${API_URL}/sessions`, {
         method: 'POST',
         headers: {
@@ -108,8 +101,17 @@ export const SessionStepper: React.FC = () => {
       }
 
       const { id: newSessionId } = await response.json();
+      return newSessionId;
+    } catch (err) {
+      setError('Failed to create session. Please try again.');
+      console.error('Error creating session:', err);
+    }
+  }
+
+  const handleParticipationContinue = async () => {
+    try {
+      const newSessionId = await createSession();
       setSessionId(newSessionId);
-      
       setStep(2);
     } catch (err) {
       setError('Failed to create session. Please try again.');
@@ -126,10 +128,21 @@ export const SessionStepper: React.FC = () => {
 
     try {
       websocketService.startSession();
-      // Navigation will be handled by the session state update listener
     } catch (err) {
       setError('Failed to start session. Please try again.');
       console.error('Error starting session:', err);
+    }
+  };
+
+  const handleEndSession = async () => {
+    if (!sessionId) return;
+
+    try {
+      websocketService.endSession();
+      navigate('/');
+    } catch (err) {
+      setError('Failed to end session. Please try again.');
+      console.error('Error ending session:', err);
     }
   };
 
@@ -151,24 +164,6 @@ export const SessionStepper: React.FC = () => {
 
   return (
     <>
-      {/* Demo: Button to go to join page */}
-      {!participantStep && (
-        <div className="flex justify-end mb-4">
-          <button
-            className="px-4 py-2 rounded bg-green-600 text-white font-semibold"
-            onClick={() => setParticipantStep(true)}
-          >
-            Join as Participant
-          </button>
-        </div>
-      )}
-      {/* Participant join page */}
-      {participantStep && sessionId && (
-        <JoinSession />
-      )}
-      {/* Main session flow */}
-      {!participantStep && (
-        <>
           {step === 0 && (
             <SessionSetup
               onContinue={handleSessionSetupContinue}
@@ -195,81 +190,15 @@ export const SessionStepper: React.FC = () => {
             <LaunchStep onBack={() => setStep(2)} onContinue={handleLaunchContinue} sessionData={sessionData} />
           )}
           {step === 4 && sessionId && (
-            <div className="max-w-4xl mx-auto py-10">
-              <h1 className="text-3xl font-bold mb-6">Waiting for participants</h1>
-              <div className="bg-white rounded-lg shadow p-8 flex flex-col md:flex-row gap-8">
-                <div className="flex-1">
-                  <div className="mb-4 font-semibold text-lg">Share this link or QR code with participants to join the session</div>
-                  <div className="mb-4">
-                    <input
-                      className="w-full border rounded px-3 py-2 font-mono text-sm bg-gray-100"
-                      value={`${window.location.origin}/join/${sessionId}`}
-                      readOnly
-                    />
-                  </div>
-                  <button 
-                    className="px-6 py-2 rounded bg-blue-600 text-white font-semibold"
-                    onClick={() => {
-                      navigator.clipboard.writeText(`${window.location.origin}/join/${sessionId}`);
-                    }}
-                  >
-                    Copy Join Link
-                  </button>
-                </div>
-                <div className="flex flex-col items-center justify-center">
-                  <div className="w-32 h-32 bg-gray-100 flex items-center justify-center rounded-lg border mb-2">QR</div>
-                  <div className="text-xs text-gray-500">Scan to join</div>
-                </div>
-              </div>
-              <div className="mt-8 flex flex-col md:flex-row gap-8">
-                <div className="flex-1 bg-white rounded-lg shadow p-6">
-                  <div className="font-semibold mb-2">Session Info</div>
-                  <div className="text-sm text-gray-500 mb-1">Type: <span className="font-semibold text-gray-700">{sessionData.template || 'Retrospective'}</span></div>
-                  <div className="text-sm text-gray-500 mb-1">Duration: <span className="font-semibold text-gray-700">{sessionData.duration || 60} min</span></div>
-                  <div className="text-sm text-gray-500 mb-1">Anonymous: <span className="font-semibold text-gray-700">{sessionData.anonymous ? 'Yes' : 'No'}</span></div>
-                </div>
-                <div className="flex-1 bg-white rounded-lg shadow p-6">
-                  <div className="font-semibold mb-2">Participants</div>
-                  {sessionState ? (
-                    <ul className="text-sm text-gray-700">
-                      {sessionState.participants.map((participant) => (
-                        <li key={participant.id} className="flex items-center gap-2">
-                          {participant.name}
-                          <span className={`ml-2 text-xs rounded px-2 py-0.5 ${participant.status === 'ACTIVE' ? 'bg-green-200 text-green-800' : 'bg-gray-200 text-gray-600'}`}>
-                            {participant.status === 'ACTIVE' ? 'Active' : 'Inactive'}
-                          </span>
-                          {participant.isHost && (
-                            <span className="ml-2 text-xs bg-gray-200 rounded px-2 py-0.5">Host</span>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="text-sm text-gray-500">No participants yet</div>
-                  )}
-                </div>
-              </div>
-              <div className="mt-12 bg-white rounded-lg shadow p-6 flex items-center justify-between">
-                <div>
-                  <div className="font-bold text-lg mb-1">Ready to Start?</div>
-                  <div className="text-gray-500 text-sm">
-                    {sessionState?.participants.length ? 
-                      `${sessionState.participants.filter(p => p.status === 'ACTIVE')?.length} participants have joined.` :
-                      'Waiting for participants to join...'}
-                  </div>
-                </div>
-                <button 
-                  className="px-6 py-2 rounded bg-blue-600 text-white font-semibold flex items-center disabled:bg-gray-400"
-                  disabled={!sessionState?.participants.length}
-                  onClick={handleStartSession}
-                >
-                  <span className="mr-2">▶</span> Start Session
-                </button>
-              </div>
-            </div>
+            <WaitingLobby
+              sessionId={sessionId}
+              sessionState={sessionState}
+              sessionData={sessionData}
+              handleCopyLink={() => navigator.clipboard.writeText(`${window.location.origin}/join/${sessionId}`)}
+              handleStartSession={handleStartSession}
+              handleEndSession={handleEndSession}
+            />
           )}
-        </>
-      )}
     </>
   );
 }; 

@@ -1,15 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { SectionType, ParticipantStatus, SectionStatus } from '@rohit-constellation/types';
+import { SectionType, ParticipantStatus, SectionStatus, QuestionResponse } from '@rohit-constellation/types';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 
 import { SessionEventsService } from './session-events.service';
 import { CreateSessionDto } from './session.dto';
 import { Session } from './session.entity';
-
-// import { SessionStatus } from '@rohit-constellation/types';
-
 @Injectable()
 export class SessionService {
   constructor(
@@ -125,19 +122,26 @@ export class SessionService {
     session.status = 'ACTIVE';
     const updatedSession = await this.sessionRepository.save(session);
     
-    // Emit session status change
-    await this.eventsService.emitSessionStatus(id, 'ACTIVE');
-    
     // Emit section status for the first section
-    if (session.sections.length > 0) {
-      const firstSection = session.sections[0];
-      await this.eventsService.emitSectionStatus(id, firstSection.id, 'ACTIVE');
-    }
+    // if (session.sections.length > 0) {
+    //   const firstSection = session.sections[0];
+    //   await this.eventsService.emitSectionStatus(id, firstSection.id, 'ACTIVE');
+    // }
 
     return updatedSession;
   }
 
-  async addParticipant(sessionId: string, name: string): Promise<Session> {
+  async completeSession(id: string): Promise<Session> {
+    const session = await this.getSession(id);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    session.status = 'COMPLETED';
+    return this.sessionRepository.save(session);
+  }
+
+  async addParticipant(sessionId: string, name: string, role: string = 'PARTICIPANT'): Promise<Session> {
     const session = await this.getSession(sessionId);
     if (!session) {
       throw new Error('Session not found');
@@ -146,7 +150,7 @@ export class SessionService {
     const participant = {
       id: uuidv4(),
       name,
-      role: 'PARTICIPANT' as const,
+      role: role as 'PARTICIPANT' | 'HOST',
       status: 'ACTIVE' as const,
       currentSection: session.sections[0]?.id || '',
       currentQuestion: session.sections[0]?.questions[0]?.id || '',
@@ -188,6 +192,7 @@ export class SessionService {
     const participant = session.participants.find(p => p.id === participantId);
     if (!participant) {
       console.log('Participant not found', participantId);
+      return
     }
 
     participant.status = status;
@@ -239,5 +244,47 @@ export class SessionService {
     );
 
     return updatedSession;
+  }
+
+  async submitAnswer(
+    sessionId: string,
+    participantId: string,
+    questionId: string,
+    response: string | number,
+  ): Promise<QuestionResponse> {
+    const session = await this.getSession(sessionId);
+    if (!session) {
+      throw new Error('Session not found');
+    }
+
+    const participant = session.participants.find(p => p.id === participantId);
+    if (!participant) {
+      throw new Error('Participant not found');
+    }
+
+    // Ensure the question exists in the session (optional, but good practice)
+    const questionExists = session.sections.some(section =>
+      section.questions.some(q => q.id === questionId)
+    );
+    if (!questionExists) {
+      throw new Error('Question not found in session');
+    }
+
+    const newAnswer: QuestionResponse = {
+      id: uuidv4(),
+      sessionId,
+      participantId,
+      questionId,
+      response,
+      createdAt: new Date(),
+    };
+
+    if (!session.answers) {
+      session.answers = [];
+    }
+    session.answers.push(newAnswer);
+
+    await this.sessionRepository.save(session);
+    return newAnswer;
   }
 }

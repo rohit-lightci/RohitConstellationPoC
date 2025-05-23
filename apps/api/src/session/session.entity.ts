@@ -58,7 +58,7 @@ export class Session {
   participants: {
     id: string;
     name: string;
-    role: 'PARTICIPANT';
+    role: 'PARTICIPANT' | 'HOST';
     status: ParticipantStatus;
     currentSection: string;
     currentQuestion: string;
@@ -86,5 +86,20 @@ export class Session {
     }[];
     startedAt?: Date;
     completedAt?: Date;
+  }[];
+
+  @Column('jsonb', { default: [] })
+  answers: {
+    id: string;
+    questionId: string;
+    participantId: string;
+    sessionId: string;
+    response: string | number;
+    createdAt: Date;
+    evaluation?: {
+      isSufficient: boolean;
+      score?: number;
+      feedback?: string;
+    };
   }[];
 }

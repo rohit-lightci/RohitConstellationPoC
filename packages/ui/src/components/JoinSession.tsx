@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { websocketService, SessionState, SessionParticipant } from '../services/websocket';
+import { websocketService } from '../services/websocket';
+import { SessionState, SESSION_EVENT } from '@rohit-constellation/types';
+import { useSession } from '../context/SessionContext';
 
 export const JoinSession: React.FC = () => {
   const { sessionId } = useParams<{ sessionId: string }>();
@@ -10,46 +12,111 @@ export const JoinSession: React.FC = () => {
   const [submitted, setSubmitted] = useState(false);
   const [sessionState, setSessionState] = useState<SessionState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [isSessionActive, setIsSessionActive] = useState(false);
+  const [hasQuestion, setHasQuestion] = useState(false);
+  const { setParticipantId, participantId } = useSession();
+
+  // On mount, set participantId from localStorage if not set
+  useEffect(() => {
+    if (!participantId) {
+      try {
+        const stored = localStorage.getItem('session_participant');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed && parsed.id) {
+            console.log('[JoinSession] Setting participantId from localStorage:', parsed.id);
+            setParticipantId(parsed.id);
+          }
+        }
+      } catch (e) {
+        console.error('[JoinSession] Error reading participantId from localStorage', e);
+      }
+    }
+  }, [participantId, setParticipantId]);
 
   useEffect(() => {
     if (!sessionId) {
       setError('No session ID provided');
       return;
     }
-
-    // Connect to WebSocket when component mounts
     websocketService.connect(sessionId);
 
-    // Set up event listeners
+    // Handle session state updates
     websocketService.onSessionStateUpdate((state) => {
       setSessionState(state);
-      if (state.status === 'active') {
-        // Navigate to active session view when session starts
-        navigate(`/session/${sessionId}/active`);
+      if (state.status === 'ACTIVE') {
+        setIsSessionActive(true);
+      }
+      console.log('[JoinSession] Session state update:', state.status);
+
+      // Fix: If submitted, participantId is not set, and session state is received, try to find participant by name/role
+      if (submitted && !participantId && name && role && state.participants) {
+        const found = state.participants.find(
+          (p) => p.name === name && p.role === role
+        );
+        if (found) {
+          console.log('[JoinSession] Found participant in session state:', found);
+          setParticipantId(found.id);
+        }
       }
     });
 
-    websocketService.onParticipantJoined((participant) => {
-      console.log('New participant joined:', participant);
+    // Register handler ONCE for participant joined
+    websocketService.on(SESSION_EVENT.PARTICIPANT_JOINED, (response: any) => {
+      console.log('[JoinSession] Participant joined:', response);
+      if (response && response.participantId) {
+        setParticipantId(response.participantId);
+      }
     });
 
-    // Cleanup on unmount
+    // Handle question ready event
+    websocketService.onQuestionReady(() => {
+      setHasQuestion(true);
+      console.log('[JoinSession] Question ready event received');
+    });
+
     return () => {
       websocketService.removeAllListeners();
       websocketService.disconnect();
     };
-  }, [sessionId, navigate]);
+  }, [sessionId, setParticipantId]);
+
+  // Navigate to /active when session is active and participantId is set
+  useEffect(() => {
+    console.log('[JoinSession] Navigation check:', {
+      isSessionActive,
+      participantId,
+      hasQuestion
+    });
+
+    if (!participantId) {
+      setParticipantId(JSON.parse(localStorage.getItem("session_participant") || "{}").id);
+    }
+    console.log('Participant ID>>>>>:', participantId);
+
+    if (isSessionActive && participantId) {
+      navigate(`/session/${sessionId}/active`);
+    }
+  }, [isSessionActive, hasQuestion, navigate, sessionId, participantId]);
 
   const handleSubmit = () => {
     if (!name || !role || !sessionId) return;
-
     try {
-      websocketService.joinSession(name, role);
+      websocketService.joinSession(name, role, setParticipantId);
       setSubmitted(true);
     } catch (err) {
       setError('Failed to join session. Please try again.');
       console.error('Error joining session:', err);
     }
+  };
+
+  const handleLeave = () => {
+    if (participantId) {
+      websocketService.leaveSession(participantId);
+    }
+    setSubmitted(false);
+    setName('');
+    setRole('');
   };
 
   if (error) {
@@ -97,10 +164,16 @@ export const JoinSession: React.FC = () => {
         ) : (
           <div className="text-center">
             <div className="text-lg font-semibold text-gray-700 mb-4">
-              Waiting for session to start...
+              {isSessionActive && !hasQuestion ? 'Session started, waiting for question...' : 'Waiting for session to start...'}
             </div>
+            <button
+              className="mt-4 px-4 py-2 rounded bg-red-600 text-white font-semibold"
+              onClick={handleLeave}
+            >
+              Leave Session
+            </button>
             {sessionState && (
-              <div className="text-sm text-gray-500">
+              <div className="text-sm text-gray-500 mt-4">
                 <div>Session: {sessionState.id}</div>
                 <div>Status: {sessionState.status}</div>
                 <div>Participants: {sessionState.participants.length}</div>
