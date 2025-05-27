@@ -23,7 +23,7 @@
         "db:create": "npx ts-node -P ./tsconfig.json -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:create ./src/migrations/migration -d ./typeorm.config.ts",
         "db:migrate": "npx ts-node -P ./tsconfig.json -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:run -d ./typeorm.config.ts",
         "db:revert": "npx ts-node -P ./tsconfig.json -r tsconfig-paths/register ./node_modules/typeorm/cli.js migration:revert -d ./typeorm.config.ts",
-        "db:reset": "./scripts/reset-db.sh"
+        "db:reset": "./scripts/reset-db.sh && npm run db:migrate"
     },
     "dependencies": {
         "@nestjs/common": "^11.0.1",
@@ -38,6 +38,7 @@
         "class-transformer": "^0.5.1",
         "class-validator": "^0.14.2",
         "dotenv": "^16.5.0",
+        "node-cache": "^5.1.2",
         "pg": "^8.16.0",
         "reflect-metadata": "^0.2.2",
         "rxjs": "^7.8.1",
@@ -57,6 +58,7 @@
         "@types/express": "^5.0.0",
         "@types/jest": "^29.5.14",
         "@types/node": "^22.10.7",
+        "@types/node-cache": "^4.2.5",
         "@types/supertest": "^6.0.2",
         "@types/uuid": "^10.0.0",
         "eslint": "^9.18.0",

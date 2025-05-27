@@ -23,7 +23,7 @@
         "strictPropertyInitialization": false,
         "composite": true
     },
-    "include": ["src/**/*", "scripts/**/*", "test/**/*", "typeorm.config.ts"],
+    "include": ["src/**/*", "scripts/**/*", "test/**/*", "typeorm.config.ts", "package.json"],
     "exclude": ["node_modules", "dist", "build"],
     "references": [
         { "path": "../../packages/types" }

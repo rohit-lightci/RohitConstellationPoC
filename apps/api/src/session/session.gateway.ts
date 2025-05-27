@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import {
   WebSocketGateway,
   SubscribeMessage,
@@ -24,6 +24,8 @@ import { SessionService } from './session.service';
 export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server: Server;
+
+  private readonly logger = new Logger(SessionGateway.name);
 
   // Map to track which sessions a socket is connected to
   private socketSessions = new Map<string, Set<string>>();
@@ -57,7 +59,7 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
     if (sessionId && participantId && name && role) {
       try {
         console.log('Attempting participant reconnection...');
-        const session = await this.sessionService.getSession(sessionId);
+        const session = await this.sessionService.findOne(sessionId);
         if (!session) {
           console.log('Session not found during reconnection');
           return;
@@ -139,7 +141,7 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
       // After disconnect, emit updated session state if sessionId is present
       if (sessionId) {
-        const session = await this.sessionService.getSession(sessionId as string);
+        const session = await this.sessionService.findOne(sessionId as string);
         if (session) {
           const sessionState = {
             id: sessionId,
@@ -184,7 +186,7 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
 
     // Add participant to session
     try {
-      const session = await this.sessionService.addParticipant(sessionId, data.name, data.role);
+      const session = await this.sessionService.addParticipant(sessionId, data.name, data.role as 'PARTICIPANT' | 'HOST');
       const participant = session.participants[session.participants.length - 1];
       
       // Join participant room
@@ -257,7 +259,7 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
     // Emit updated session state after participant leaves
     if (sessionId) {
       console.log('Emitting updated session state after participant leaves');
-      const session = await this.sessionService.getSession(sessionId);
+      const session = await this.sessionService.findOne(sessionId);
       if (session) {
         const sessionState = {
           id: sessionId,
@@ -351,29 +353,41 @@ export class SessionGateway implements OnGatewayConnection, OnGatewayDisconnect 
     @ConnectedSocket() client: Socket,
     @MessageBody() data: { sessionId: string, participantId: string }
   ) {
-
     const { sessionId, participantId } = data;
-    // Fetch session and participant
-    const session = await this.sessionService.getSession(sessionId);
-    console.log('Session>>>>>:', session);
-    if (!session) return;
-    const participant = session.participants.find(p => p.id === participantId);
-    if (!participant) return;
-    const section = session.sections.find(s => s.id === participant.currentSection);
-    if (!section) return;
-    const question = section.questions.find(q => q.id === participant.currentQuestion);
-    if (!question) return;
-    // Emit the question to this participant
-    console.log('Emitting question to participant:', {
-      sessionId,
-      participantId,
-      question,
-    });
-    client.emit(SESSION_EVENT.QUESTION_READY, {
-      sessionId,
-      participantId,
-      question,
-    });
+    try {
+      const session = await this.sessionService.findOne(sessionId);
+      if (!session) {
+        client.emit('error', { message: 'Session not found' });
+        return;
+      }
+      const participant = session.participants.find(p => p.id === participantId);
+      if (!participant) {
+        client.emit('error', { message: 'Participant not found' });
+        return;
+      }
+      if (!participant.currentQuestion) {
+         this.eventsService.emitParticipantStatus(sessionId, participantId, 'COMPLETED');
+        // client.emit('error', { message: 'Participant has no current question or has completed the session.' });
+        return;
+      }
+      const question = session.sections
+        .flatMap(s => s.questions)
+        .find(q => q.id === participant.currentQuestion);
+
+      if (question) {
+        this.eventsService.emitQuestionReady(sessionId, participantId, question);
+      } else {
+        // This case might mean the participant.currentQuestion is stale or points to a non-existent question
+        client.emit('error', { message: 'Current question not found in session data.' });
+        // Potentially, try to reset participant to a valid state or mark as completed
+        this.logger.warn(`Participant ${participantId} in session ${sessionId} has currentQuestion ${participant.currentQuestion} which was not found.`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error fetching question.';
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(`Error in handleGetQuestion for S:${sessionId} P:${participantId}: ${errorMessage}`, errorStack);
+      client.emit('error', { message: 'Error fetching question.' });
+    }
   }
 
   @SubscribeMessage(SESSION_EVENT.QUESTION_ANSWER)

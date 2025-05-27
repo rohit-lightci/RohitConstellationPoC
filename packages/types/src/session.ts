@@ -4,9 +4,12 @@ export type ParticipantStatus = 'ACTIVE' | 'INACTIVE' | 'COMPLETED';
 export type SectionType = 'MAD' | 'SAD' | 'GLAD';
 export type SectionStatus = 'PENDING' | 'ACTIVE' | 'COMPLETED';
 export type QuestionType = 'TEXT' | 'RATING' | 'MULTIPLE_CHOICE' | 'AGREE_DISAGREE';
+export type QuestionIntent = 'BASE' | 'FOLLOW_UP' | 'CROSS_POLLINATION';
+
 
 export interface Session {
   id: string;
+  version: number;
   template: string;
   title: string;
   description?: string;
@@ -47,6 +50,7 @@ export interface Section {
   questions: Question[];
   startedAt?: Date;
   completedAt?: Date;
+  goal?: string;
 }
 
 export interface Question {
@@ -55,11 +59,13 @@ export interface Question {
   text: string;
   sectionId: string;
   order: number;
-  isBaseQuestion: boolean;
   parentQuestionId?: string;  // for follow-up questions
+  generatedForParticipantId?: string;
   options?: string[];  // for multiple choice
   minRating?: number;  // for rating questions
   maxRating?: number;  // for rating questions
+  intent: QuestionIntent;
+  goal?: string;
 }
 
 export interface QuestionResponse {

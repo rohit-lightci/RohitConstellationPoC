@@ -1,7 +1,8 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
 import { AnswerModule } from '../answer/answer.module';
+import { OrchestratorModule } from '../orchestrator/orchestrator.module';
 
 import { SessionEventsService } from './session-events.service';
 import { SessionController } from './session.controller';
@@ -13,8 +14,10 @@ import { SessionService } from './session.service';
   imports: [
     TypeOrmModule.forFeature([Session]),
     AnswerModule,
+    forwardRef(() => OrchestratorModule),
   ],
   controllers: [SessionController],
   providers: [SessionService, SessionGateway, SessionEventsService],
+  exports: [SessionService, SessionEventsService]
 })
 export class SessionModule {} 

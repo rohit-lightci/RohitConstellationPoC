@@ -1,161 +1,259 @@
-import { Injectable, NotFoundException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, Inject, forwardRef, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { SectionType, ParticipantStatus, SectionStatus, Question } from '@rohit-constellation/types';
+import {
+  SectionType,
+  ParticipantStatus,
+  SectionStatus,
+  Question,
+  QuestionIntent,
+  CreateSessionDto as TypesCreateSessionDto,
+  Session as TypesSession,
+  Participant as TypesParticipant,
+  Section as TypesSection,
+} from '@rohit-constellation/types';
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 
 import { Answer } from '../answer/answer.entity';
 import { AnswerService } from '../answer/answer.service';
+import { OrchestratorService } from '../orchestrator/orchestrator.service';
 
 import { SessionEventsService } from './session-events.service';
-import { CreateSessionDto } from './session.dto';
 import { Session } from './session.entity';
 
 @Injectable()
 export class SessionService {
+  private readonly logger = new Logger(SessionService.name);
+
   constructor(
     @InjectRepository(Session)
     private sessionRepository: Repository<Session>,
-    private eventsService: SessionEventsService,
-    private answerService: AnswerService,
+    private readonly eventsService: SessionEventsService,
+    private readonly answerService: AnswerService,
+    @Inject(forwardRef(() => OrchestratorService))
+    private readonly orchestratorService: OrchestratorService,
   ) {}
 
-  private createBaseQuestions(sectionType: SectionType): Question[] {
+  private mapEntityToType(sessionEntity: Session): TypesSession {
+    return {
+        id: sessionEntity.id,
+        template: sessionEntity.template,
+        title: sessionEntity.title,
+        description: sessionEntity.description,
+        type: sessionEntity.type,
+        status: sessionEntity.status,
+        globalTimeLimit: sessionEntity.globalTimeLimit,
+        createdAt: sessionEntity.createdAt,
+        expiresAt: sessionEntity.expiresAt,
+        createdBy: sessionEntity.createdBy,
+        isAnonymous: sessionEntity.isAnonymous,
+        participationRule: sessionEntity.participationRule,
+        permissions: sessionEntity.permissions,
+        participants: sessionEntity.participants as TypesParticipant[], 
+        sections: sessionEntity.sections as TypesSection[],
+        version: sessionEntity.version,
+    };
+  }
+  
+  private mapTypeToEntity(sessionType: TypesSession): Session {
+      const entity = new Session();
+      Object.assign(entity, sessionType);
+      entity.participants = sessionType.participants as any[];
+      entity.sections = sessionType.sections as any[];
+      return entity;
+  }
+
+  private createBaseQuestions(sectionType: SectionType, sectionId: string): Question[] {
     const baseQuestion: Question = {
       id: uuidv4(),
-      type: 'TEXT' as const,
+      type: 'TEXT',
       text: `What made you ${sectionType.toLowerCase()}?`,
-      sectionId: '', 
+      sectionId: sectionId,
       order: 1,
-      isBaseQuestion: true,
+      intent: 'BASE' as QuestionIntent,
     };
     return [baseQuestion];
   }
 
-  private createRetroSections(): Session['sections'] {
-    const sections = ['MAD', 'SAD', 'GLAD'].map((type, index) => ({
-      id: uuidv4(),
-      type: type as SectionType,
-      order: index + 1, // Adding order to sections for predictable progression
-      timeLimit: 10, 
-      status: 'PENDING' as const,
-      questions: this.createBaseQuestions(type as SectionType),
-      startedAt: undefined,
-      completedAt: undefined,
-    }));
-    sections.forEach(section => {
-      section.questions.forEach(question => {
-        question.sectionId = section.id;
-      });
+  private createRetroSections(): TypesSection[] {
+    const sectionsData: Array<{ type: SectionType; order: number; goal?: string }> = [
+        { type: 'MAD', order: 1, goal: "Identify things that caused frustration or impediments." },
+        { type: 'SAD', order: 2, goal: "Identify things that were disappointing or didn't go well." },
+        { type: 'GLAD', order: 3, goal: "Identify things that went well or were positive." },
+    ];
+
+    const sections: TypesSection[] = sectionsData.map(data => {
+      const sectionId = uuidv4();
+      return {
+        id: sectionId,
+        type: data.type,
+        order: data.order,
+        goal: data.goal,
+        timeLimit: 10,
+        status: 'PENDING',
+        questions: this.createBaseQuestions(data.type, sectionId),
+        startedAt: undefined,
+        completedAt: undefined,
+      };
     });
     return sections;
   }
 
-  async createSession(dto: CreateSessionDto): Promise<Session> {
-    const session = new Session();
-    session.title = dto.title;
-    session.template = dto.template;
-    session.description = dto.description;
-    session.type = dto.type;
-    session.globalTimeLimit = dto.globalTimeLimit;
-    session.expiresAt = dto?.expiresAt ?? new Date(new Date().setDate(new Date().getDate() + 1));
-    session.createdBy = dto.createdBy;
-    session.isAnonymous = dto.isAnonymous;
-    session.participationRule = dto.participationRule;
-    session.permissions = dto.permissions;
-    session.status = 'DRAFT';
-    session.participants = [];
-    session.sections = this.createRetroSections();
-    return this.sessionRepository.save(session);
+  async createSession(dto: TypesCreateSessionDto): Promise<TypesSession> {
+    const sessionEntity = new Session();
+    sessionEntity.title = dto.title;
+    sessionEntity.template = dto.template;
+    sessionEntity.description = dto.description;
+    sessionEntity.type = dto.type;
+    sessionEntity.globalTimeLimit = dto.globalTimeLimit;
+    sessionEntity.expiresAt = typeof dto.expiresAt === 'string' ? new Date(dto.expiresAt) : dto.expiresAt ?? new Date(Date.now() + 24 * 60 * 60 * 1000);
+    sessionEntity.createdBy = dto.createdBy;
+    sessionEntity.isAnonymous = dto.isAnonymous;
+    sessionEntity.participationRule = dto.participationRule;
+    sessionEntity.permissions = dto.permissions;
+    sessionEntity.status = 'DRAFT';
+    sessionEntity.participants = [];
+    sessionEntity.sections = this.createRetroSections();
+    
+    const savedEntity = await this.sessionRepository.save(sessionEntity);
+    return this.mapEntityToType(savedEntity);
   }
 
-  async getSession(id: string): Promise<Session | null> {
-    return this.sessionRepository.findOne({ where: { id } });
+  async findOne(id: string, loadRelations = false): Promise<TypesSession | null> {
+    const findOptions = loadRelations ? { where: { id }, relations: ['answers'] } : { where: { id } };
+    const sessionEntity = await this.sessionRepository.findOne(findOptions);
+    if (!sessionEntity) return null;
+    return this.mapEntityToType(sessionEntity);
+  }
+  
+  async save(sessionData: TypesSession): Promise<TypesSession> {
+    this.logger.log(`Saving session ${sessionData.id} from orchestrator/cache.`);
+    let entityToSave: Session;
+    const existingEntity = await this.sessionRepository.findOne({ where: { id: sessionData.id }});
+
+    if (existingEntity) {
+        entityToSave = this.sessionRepository.merge(existingEntity, sessionData as unknown as Partial<Session>);
+        entityToSave.participants = sessionData.participants as any[];
+        entityToSave.sections = sessionData.sections as any[];
+
+    } else {
+        this.logger.warn(`Session ${sessionData.id} not found in DB during save. Creating new entity from data.`);
+        entityToSave = this.sessionRepository.create(sessionData as unknown as Session);
+    }
+    
+    const savedEntity = await this.sessionRepository.save(entityToSave);
+    return this.mapEntityToType(savedEntity);
   }
 
-  async activateSession(id: string): Promise<Session> {
-    const session = await this.getSession(id);
+  async activateSession(id: string): Promise<TypesSession> {
+    const session = await this.findOne(id, true);
     if (!session) throw new NotFoundException('Session not found');
+    
     session.status = 'ACTIVE';
-    // When session is activated, if there are participants, proactively send them the first question.
-    if (session.participants.length > 0 && session.sections.length > 0 && session.sections[0].questions.length > 0) {
-        const firstSection = session.sections.sort((a,b) => a.order - b.order)[0];
-        const firstQuestion = firstSection.questions.sort((a,b) => a.order - b.order)[0];
-        for (const participant of session.participants) {
-            if (participant.status === 'ACTIVE') { // Only send to active participants not yet completed
-                 // Update participant's current question/section pointers if they are empty
-                 if (!participant.currentSection && !participant.currentQuestion) {
-                    participant.currentSection = firstSection.id;
-                    participant.currentQuestion = firstQuestion.id;
+    
+    if (session.participants.length > 0 && session.sections.length > 0) {
+        const sortedSections = [...session.sections].sort((a,b) => a.order - b.order);
+        const firstSection = sortedSections[0];
+        if (firstSection && firstSection.questions.length > 0) {
+            const firstQuestion = [...firstSection.questions]
+                .filter(q => q.intent === 'BASE')
+                .sort((a,b) => a.order - b.order)[0];
+
+            if (firstQuestion) {
+                for (const participant of session.participants) {
+                    if (participant.status === 'ACTIVE' || participant.status === 'INACTIVE') {
+                         if (!participant.currentSection && !participant.currentQuestion) {
+                            participant.currentSection = firstSection.id;
+                            participant.currentQuestion = firstQuestion.id;
+                        }
+                        this.eventsService.emitQuestionReady(session.id, participant.id, firstQuestion);
+                    }
                 }
-                await this.eventsService.emitQuestionReady(session.id, participant.id, firstQuestion);
             }
         }
     }
-    return this.sessionRepository.save(session);
+    return this.save(session);
   }
 
-  async completeSession(id: string): Promise<Session> {
-    const session = await this.getSession(id);
+  async completeSession(id: string): Promise<TypesSession> {
+    const session = await this.findOne(id);
     if (!session) throw new NotFoundException('Session not found');
     session.status = 'COMPLETED';
-    return this.sessionRepository.save(session);
+    return this.save(session);
   }
 
-  async addParticipant(sessionId: string, name: string, role: string = 'PARTICIPANT'): Promise<Session> {
-    const session = await this.getSession(sessionId);
+  async addParticipant(sessionId: string, name: string, role: 'PARTICIPANT' | 'HOST' = 'PARTICIPANT'): Promise<TypesSession> {
+    const session = await this.findOne(sessionId, true); 
     if (!session) throw new NotFoundException('Session not found');
-    
-    const sortedSections = session.sections.sort((a, b) => a.order - b.order);
-    const firstSectionId = sortedSections?.[0]?.id || '';
-    const firstQuestionId = sortedSections?.[0]?.questions?.sort((a,b) => a.order - b.order)?.[0]?.id || '';
 
-    const newParticipant: Session['participants'][0] = {
+    const sortedSections = [...session.sections].sort((a, b) => a.order - b.order);
+    let firstSectionId = '';
+    let firstQuestionId = '';
+    let firstQuestionObject: Question | undefined = undefined;
+
+    if (sortedSections.length > 0) {
+        const firstSection = sortedSections[0];
+        firstSectionId = firstSection.id;
+        const baseQuestionsInFirstSection = [...firstSection.questions]
+            .filter(q => q.intent === 'BASE')
+            .sort((a,b) => a.order - b.order);
+        if (baseQuestionsInFirstSection.length > 0) {
+            firstQuestionObject = baseQuestionsInFirstSection[0];
+            firstQuestionId = firstQuestionObject.id;
+        }
+    }
+
+    const newParticipant: TypesParticipant = {
       id: uuidv4(),
       name,
-      role: role as 'PARTICIPANT' | 'HOST',
-      status: 'ACTIVE' as const,
+      role: role,
+      status: 'ACTIVE',
       currentSection: firstSectionId,
       currentQuestion: firstQuestionId,
       joinedAt: new Date(),
       completedAt: undefined,
     };
+    
     session.participants.push(newParticipant);
-    const updatedSession = await this.sessionRepository.save(session); // Save first to persist participant
+    
+    const updatedSession = await this.save(session);
 
-    await this.eventsService.emitParticipantStatus(sessionId, newParticipant.id, 'ACTIVE');
+    this.eventsService.emitParticipantStatus(sessionId, newParticipant.id, 'ACTIVE');
 
-    if (session.status === 'ACTIVE' && firstQuestionId) {
-        const firstQuestion = sortedSections?.[0]?.questions?.find(q => q.id === firstQuestionId);
-        if (firstQuestion) {
-             await this.eventsService.emitQuestionReady(sessionId, newParticipant.id, firstQuestion);
-        }
+    if (updatedSession.status === 'ACTIVE' && firstQuestionObject) {
+        this.eventsService.emitQuestionReady(sessionId, newParticipant.id, firstQuestionObject);
     }
-    return updatedSession; // Return the session state after participant is added and potential first Q sent
+    return updatedSession;
   }
 
-  async updateParticipantStatus(sessionId: string, participantId: string, status: ParticipantStatus): Promise<Session | undefined> {
-    const session = await this.getSession(sessionId);
-    if (!session) throw new NotFoundException('Session not found');
+  async updateParticipantStatus(sessionId: string, participantId: string, status: ParticipantStatus): Promise<TypesSession | undefined> {
+    const session = await this.findOne(sessionId);
+    if (!session) {
+        this.logger.warn(`Session ${sessionId} not found for participant status update.`);
+        throw new NotFoundException('Session not found');
+    }
     const participant = session.participants.find(p => p.id === participantId);
+
     if (!participant) {
-      console.warn(`Participant not found for status update: ${participantId} in session ${sessionId}`);
+      this.logger.warn(`Participant ${participantId} not found in session ${sessionId} for status update.`);
       return undefined;
     }
     participant.status = status;
     if (status === 'COMPLETED') participant.completedAt = new Date();
     else participant.completedAt = undefined;
-    const updatedSession = await this.sessionRepository.save(session);
-    // Emit status change AFTER saving
-    await this.eventsService.emitParticipantStatus(sessionId, participantId, status);
+    
+    const updatedSession = await this.save(session);
+    this.eventsService.emitParticipantStatus(sessionId, participantId, status);
     return updatedSession;
   }
 
-  async updateSectionStatus(sessionId: string, sectionId: string, status: SectionStatus): Promise<Session> {
-    const session = await this.getSession(sessionId);
+  async updateSectionStatus(sessionId: string, sectionId: string, status: SectionStatus): Promise<TypesSession> {
+    const session = await this.findOne(sessionId);
     if (!session) throw new NotFoundException('Session not found');
+    
     const section = session.sections.find(s => s.id === sectionId);
     if (!section) throw new NotFoundException('Section not found');
+    
     section.status = status;
     if (status === 'ACTIVE') section.startedAt = new Date();
     else if (status === 'COMPLETED') section.completedAt = new Date();
@@ -163,136 +261,49 @@ export class SessionService {
         section.startedAt = undefined;
         section.completedAt = undefined;
     }
-    return this.sessionRepository.save(session);
-  }
-
-  private async _advanceParticipantProgress(sessionId: string, participantId: string, answeredQuestionId: string): Promise<void> {
-    const session = await this.getSession(sessionId);
-    if (!session) {
-      console.error(`_advanceParticipantProgress: Session ${sessionId} not found.`);
-      throw new InternalServerErrorException('Session not found during progress advancement.');
-    }
-
-    const participant = session.participants.find(p => p.id === participantId);
-    if (!participant) {
-      console.error(`_advanceParticipantProgress: Participant ${participantId} not found in session ${sessionId}.`);
-      throw new InternalServerErrorException('Participant not found during progress advancement.');
-    }
-
-    if (participant.status === 'COMPLETED') {
-      console.log(`_advanceParticipantProgress: Participant ${participantId} already completed. No advancement.`);
-      return;
-    }
-    if (participant.currentQuestion !== answeredQuestionId) {
-      console.warn(`_advanceParticipantProgress: Answered QID ${answeredQuestionId} doesn't match current QID ${participant.currentQuestion} for P ${participantId}. No advancement.`);
-      return; 
-    }
-
-    const sortedSections = [...session.sections].sort((a, b) => a.order - b.order);
-    const currentSectionIndex = sortedSections.findIndex(s => s.id === participant.currentSection);
-    if (currentSectionIndex === -1) {
-      console.error(`_advanceParticipantProgress: Current section ${participant.currentSection} not found for P ${participantId}. Marking completed.`);
-      participant.currentQuestion = '';
-      participant.status = 'COMPLETED';
-      participant.completedAt = new Date();
-      await this.sessionRepository.save(session); 
-      await this.eventsService.emitParticipantStatus(sessionId, participantId, 'COMPLETED');
-      return;
-    }
-    const currentSection = sortedSections[currentSectionIndex];
-    const sortedQuestions = [...currentSection.questions].sort((a, b) => a.order - b.order);
-    const currentQuestionIndex = sortedQuestions.findIndex(q => q.id === participant.currentQuestion);
-
-    if (currentQuestionIndex === -1) {
-      console.error(`_advanceParticipantProgress: Current QID ${participant.currentQuestion} not found in section ${currentSection.id} for P ${participantId}. Marking completed.`);
-      participant.currentQuestion = '';
-      participant.status = 'COMPLETED';
-      participant.completedAt = new Date();
-      await this.sessionRepository.save(session);
-      await this.eventsService.emitParticipantStatus(sessionId, participantId, 'COMPLETED');
-      return;
-    }
-
-    let nextQuestion: Question | null = null;
-    if (currentQuestionIndex < sortedQuestions.length - 1) {
-      nextQuestion = sortedQuestions[currentQuestionIndex + 1];
-      participant.currentQuestion = nextQuestion.id;
-      // currentSection remains the same
-    } else {
-      // Try to find next section
-      if (currentSectionIndex < sortedSections.length - 1) {
-        for (let i = currentSectionIndex + 1; i < sortedSections.length; i++) {
-          const nextPotentialSection = sortedSections[i];
-          const sortedNextSectionQuestions = [...nextPotentialSection.questions].sort((a, b) => a.order - b.order);
-          if (sortedNextSectionQuestions.length > 0) {
-            nextQuestion = sortedNextSectionQuestions[0];
-            participant.currentSection = nextPotentialSection.id;
-            participant.currentQuestion = nextQuestion.id;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!nextQuestion) {
-      participant.currentQuestion = '';
-      participant.currentSection = ''; // Clear section too
-      participant.status = 'COMPLETED';
-      participant.completedAt = new Date();
-      console.log(`_advanceParticipantProgress: No next question for P ${participantId}. Marked COMPLETED.`);
-      await this.sessionRepository.save(session);
-      await this.eventsService.emitParticipantStatus(sessionId, participantId, 'COMPLETED');
-    } else {
-      console.log(`_advanceParticipantProgress: P ${participantId} advanced to QID ${nextQuestion.id} in Section ${participant.currentSection}.`);
-      await this.sessionRepository.save(session); // Save participant state changes
-      // Proactively emit QUESTION_READY for the next question
-      await this.eventsService.emitQuestionReady(sessionId, participantId, nextQuestion);
-    }
+    return this.save(session);
   }
 
   async submitAnswer(
     sessionId: string,
     participantId: string,
     questionId: string,
-    response: string | number,
+    responseValue: string | number,
   ): Promise<Answer> {
-    const session = await this.getSession(sessionId); 
-    if (!session) {
-      throw new NotFoundException('Session not found');
-    }
-
-    const participant = session.participants.find(p => p.id === participantId);
-    if (!participant) {
-      throw new NotFoundException('Participant not found in this session');
-    }
-
-    if (participant.status === 'COMPLETED') {
-      throw new Error('Participant has already completed the session.');
-    }
-
-    if (participant.currentQuestion !== questionId) {
-        console.warn(`SubmitAnswer: P ${participantId} trying to answer Q ${questionId} but current is ${participant.currentQuestion}`);
-        throw new Error('Submitted answer is not for the participant\'s current question.');
-    }
     
-    const questionExists = session.sections.some(s =>
-        s.questions.some(q => q.id === questionId)
-    );
-    if (!questionExists) {
-        throw new NotFoundException('Question ID does not exist in session configuration.');
+    const sessionValidation = await this.findOne(sessionId);
+    if (!sessionValidation) {
+        this.logger.error(`SubmitAnswer: Session ${sessionId} not found for P ${participantId} Q ${questionId}`);
+        throw new NotFoundException('Session not found.');
+    }
+    const participantValidation = sessionValidation.participants.find(p => p.id === participantId);
+    if (!participantValidation) {
+        this.logger.error(`SubmitAnswer: Participant ${participantId} not found in S ${sessionId} for Q ${questionId}`);
+        throw new NotFoundException('Participant not found in this session.');
+    }
+    if (participantValidation.status === 'COMPLETED') {
+        this.logger.warn(`SubmitAnswer: P ${participantId} in S ${sessionId} already COMPLETED. Q ${questionId}`);
+        throw new Error('Participant has already completed the session.');
+    }
+    if (participantValidation.currentQuestion !== questionId) {
+        this.logger.warn(`SubmitAnswer: P ${participantId} in S ${sessionId} answering Q ${questionId}, but current is ${participantValidation.currentQuestion}`);
     }
 
-    const savedAnswer = await this.answerService.create({
+    const answer = await this.answerService.create({
       sessionId,
       participantId,
       questionId,
-      response,
+      response: responseValue,
     });
 
-    // After successfully saving, advance participant's progress internally.
-    // This will also emit QUESTION_READY if there's a next question.
-    await this._advanceParticipantProgress(sessionId, participantId, questionId);
+    this.orchestratorService.processParticipantAnswer(sessionId, participantId, questionId, responseValue)
+        .catch(error => {
+            this.logger.error(
+                `Critical error in OrchestratorService.processParticipantAnswer for S:${sessionId}, P:${participantId}, Q:${questionId}. Error: ${error.message}`,
+                error.stack
+            );
+        });
 
-    return savedAnswer;
+    return answer;
   }
 }

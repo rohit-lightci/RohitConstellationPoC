@@ -1,7 +1,6 @@
 import { Body, Controller, Get, Param, Post, Put } from '@nestjs/common';
-import { ParticipantStatus, SectionStatus } from '@rohit-constellation/types';
+import { ParticipantStatus, SectionStatus, CreateSessionDto as TypesCreateSessionDto } from '@rohit-constellation/types';
 
-import { CreateSessionDto } from './session.dto';
 import { SessionService } from './session.service';
 
 @Controller('sessions')
@@ -9,14 +8,14 @@ export class SessionController {
   constructor(private readonly sessionService: SessionService) {}
 
   @Post()
-  createSession(@Body() createSessionDto: CreateSessionDto) {
-    console.log('Received session data:', JSON.stringify(createSessionDto, null, 2));
+  createSession(@Body() createSessionDto: TypesCreateSessionDto) {
+    console.log('Received session data for creation:', JSON.stringify(createSessionDto, null, 2));
     return this.sessionService.createSession(createSessionDto);
   }
 
   @Get(':id')
   getSession(@Param('id') id: string) {
-    return this.sessionService.getSession(id);
+    return this.sessionService.findOne(id);
   }
 
   @Post(':id/activate')

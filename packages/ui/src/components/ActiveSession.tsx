@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { websocketService } from '../services/websocket';
 import { Question, SESSION_EVENT, SessionState, ParticipantStatus } from '@rohit-constellation/types';
@@ -26,41 +26,61 @@ export const ActiveSession: React.FC = () => {
   const [isLoadingNextQuestion, setIsLoadingNextQuestion] = useState(false);
   const [isCompleted, setIsCompleted] = useState(false);
 
+  // Ref to hold the latest participantId
+  const participantIdRef = useRef(participantId);
+
+  // Log when the component body renders to track re-renders and initial prop/hook values
+  // console.log('[ActiveSession] Component body render. SessionId:', sessionId, 'ParticipantId (from useSession):', participantId, 'Navigate fn defined:', !!navigate);
+
+  // Effect to update the ref when participantId changes
+  useEffect(() => {
+    participantIdRef.current = participantId;
+  }, [participantId]);
+
+  // Effect for initializing participantId from localStorage
   useEffect(() => {
     if (!participantId) {
       const storedParticipant = localStorage.getItem("session_participant");
       if (storedParticipant) {
         try {
-          setParticipantId(JSON.parse(storedParticipant).id);
+          const parsedParticipant = JSON.parse(storedParticipant);
+          if (parsedParticipant && parsedParticipant.id) {
+            setParticipantId(parsedParticipant.id);
+          }
         } catch (e) {
-          console.error("Error parsing session_participant from localStorage", e);
+          // console.error("Error parsing session_participant from localStorage", e);
           localStorage.removeItem("session_participant");
         }
       }
     }
   }, [participantId, setParticipantId]);
 
-  const fetchNextQuestion = useCallback(() => {
-    if (sessionId && participantId && !isCompleted) {
-      console.log('(fetchNextQuestion) Emitting GET_QUESTION for participant:', participantId);
-      websocketService.emit(SESSION_EVENT.GET_QUESTION, { sessionId, participantId });
-    }
-  }, [sessionId, participantId, isCompleted]);
-
   useEffect(() => {
     if (!sessionId) {
       setError('No session ID provided');
+      // console.log('[ActiveSession] WebSocket listeners EFFECT - SKIPPING (no sessionId)');
       return;
     }
+    // console.log('[ActiveSession] WebSocket listeners EFFECT RUNNING for session:', sessionId, 'Current navigate fn defined:', !!navigate);
 
-    websocketService.connect(sessionId);
+    // Check if websocketService has an `isConnected` property or similar
+    // to prevent calling connect if already connected or connecting.
+    // This is a hypothetical addition, depends on websocketService's API:
+    // if (!websocketService.isConnected() && !websocketService.isConnecting()) {
+    //   websocketService.connect(sessionId);
+    // } else {
+    //   console.log('[ActiveSession] WebSocket connect skipped, already connected/connecting for session:', sessionId);
+    // }
+    websocketService.connect(sessionId); // Current behavior
 
-    const handleSessionState = (state: SessionState) => {
+    // Define handlers INSIDE the effect so they capture the current sessionId
+    // and other values from this effect's scope.
+    const effectHandleSessionState = (state: SessionState) => {
       setSessionState(state);
       if (state.status === 'COMPLETED') {
-        navigate(`/session/${sessionId}/results`);
+        navigate(`/session/${sessionId}/results`); // sessionId from effect scope
       }
-      const self = state.participants.find(p => p.id === participantId);
+      const self = state.participants.find(p => p.id === participantIdRef.current);
       if (self?.status === 'COMPLETED') {
         setIsCompleted(true);
         setCurrentQuestion(null);
@@ -68,54 +88,78 @@ export const ActiveSession: React.FC = () => {
       }
     };
 
-    const handleQuestionReady = ({ question }: { question: Question }) => {
-      console.log('[ActiveSession] Question ready received:', question);
+    const effectHandleQuestionReady = ({ question }: { question: Question }) => {
+      // console.log('[ActiveSession] effectHandleQuestionReady CALLED. New question:', question);
       setCurrentQuestion(question);
-      setIsLoadingNextQuestion(false);
+      setIsLoadingNextQuestion(prevState => {
+        // console.log('[ActiveSession] setIsLoadingNextQuestion in effectHandleQuestionReady. Old val:', prevState, 'New val:', false);
+        return false;
+      });
+      console.log("question ready")
       setIsCompleted(false);
+      // console.log('[ActiveSession] effectHandleQuestionReady FINISHED.');
     };
 
-    const handleParticipantStatus = (payload: { participantId: string, status: ParticipantStatus }) => {
-      if (payload.participantId === participantId && payload.status === 'COMPLETED') {
-        console.log('[ActiveSession] Participant status is COMPLETED.');
+    const effectHandleParticipantStatus = (payload: { participantId: string, status: ParticipantStatus }) => {
+      if (payload.participantId === participantIdRef.current && payload.status === 'COMPLETED') {
+        console.log('[ActiveSession] Participant status is COMPLETED via effectHandle.');
         setIsCompleted(true);
         setCurrentQuestion(null);
         setIsLoadingNextQuestion(false);
       }
     };
 
-    websocketService.onSessionStateUpdate(handleSessionState);
-    websocketService.onQuestionReady(handleQuestionReady);
-    websocketService.on(SESSION_EVENT.PARTICIPANT_STATUS, handleParticipantStatus);
-
-    if (participantId && !isLoadingNextQuestion && !currentQuestion && !isCompleted) {
-      fetchNextQuestion();
-    }
+    websocketService.onSessionStateUpdate(effectHandleSessionState);
+    websocketService.onQuestionReady(effectHandleQuestionReady);
+    websocketService.on(SESSION_EVENT.PARTICIPANT_STATUS, effectHandleParticipantStatus);
 
     return () => {
-      websocketService.removeAllListeners();
+      console.log('[ActiveSession] Cleaning up WebSocket listeners for session:', sessionId);
+      // It's crucial that removeAllListeners or specific removal works correctly.
+      // If events are bound with these new anonymous functions, ensure they can be removed.
+      // Often, websocket libraries require the exact same function reference for removal.
+      // If websocketService.removeAllListeners() generically clears all for a type, it's fine.
+      // Consider a cleanup that removes these specific handlers if the library supports it
+      // and if removeAllListeners is too broad or has issues.
+      websocketService.removeAllListeners(); 
     };
-  }, [sessionId, navigate, participantId, fetchNextQuestion, isLoadingNextQuestion, currentQuestion, isCompleted]);
+  }, [sessionId]); // New dependencies: Only sessionId. `navigate` is stable and accessed via closure in effectHandleSessionState.
+
+  const fetchNextQuestion = useCallback(() => {
+    if (sessionId && participantIdRef.current && !isCompleted && !currentQuestion) {
+      // console.log('(fetchNextQuestion) Emitting GET_QUESTION for participant:', participantIdRef.current);
+      setIsLoadingNextQuestion(true);
+      websocketService.emit(SESSION_EVENT.GET_QUESTION, { sessionId, participantId: participantIdRef.current });
+    }
+  }, [sessionId, isCompleted, currentQuestion]);
+
+  useEffect(() => {
+    if (participantId && !isLoadingNextQuestion && !currentQuestion && !isCompleted) {
+      // console.log('[ActiveSession] Attempting to fetch initial question (participantId available).');
+      fetchNextQuestion();
+    }
+  }, [participantId, isLoadingNextQuestion, currentQuestion, isCompleted, fetchNextQuestion]);
 
   const handleSubmitAnswer = async () => {
-    if (!currentAnswer.trim() || !currentQuestion?.id || !participantId) {
+    if (!currentAnswer.trim() || !currentQuestion?.id || !participantIdRef.current) {
       return;
     }
     
     setError(null); 
+    setIsLoadingNextQuestion(true);
     
     try {
-      const ack = await websocketService.submitAnswer(currentQuestion.id, currentAnswer, participantId);
+      const ack = await websocketService.submitAnswer(currentQuestion.id, currentAnswer, participantIdRef.current);
       console.log('[ActiveSession] Answer submission acknowledged by server:', ack);
       setCurrentAnswer(''); 
 
-      setIsLoadingNextQuestion(true); 
-      console.log('[ActiveSession] isLoadingNextQuestion SET TO TRUE (after ack, awaiting server push for next Q)');
+      // setIsLoadingNextQuestion(true); // REMOVED FROM HERE
+      // console.log('[ActiveSession] isLoadingNextQuestion SET TO TRUE (after ack, awaiting server push for next Q)');
       // DO NOT call fetchNextQuestion() here anymore.
       // The server will proactively push QUESTION_READY if a next question exists.
 
     } catch (err: any) {
-      console.error('[ActiveSession] Error submitting answer or processing ack:', err);
+      // console.error('[ActiveSession] Error submitting answer or processing ack:', err);
       setError(err?.message || 'Failed to submit answer. Please try again.');
       setIsLoadingNextQuestion(false); 
     }
@@ -125,11 +169,17 @@ export const ActiveSession: React.FC = () => {
     try {
       websocketService.emit('session:question:answer:upvote', { answerId });
     } catch (err) {
-      console.error('Error upvoting answer:', err);
+      // console.error('Error upvoting answer:', err);
     }
   };
 
-  console.log('[ActiveSession] Rendering - isLoadingNextQuestion:', isLoadingNextQuestion, 'isCompleted:', isCompleted, 'currentQuestion:', !!currentQuestion);
+  // console.log(
+  //   '[ActiveSession] Rendering - isLoadingNextQuestion:', isLoadingNextQuestion, 
+  //   'isCompleted:', isCompleted, 
+  //   'currentQuestion:', currentQuestion ? currentQuestion.id : null, 
+  //   'currentQuestionText:', currentQuestion ? currentQuestion.text.substring(0,20) : null, 
+  //   'sessionStatus:', sessionState?.status
+  // );
 
   if (error) {
     return (

@@ -1,5 +1,5 @@
 import { Participant, Section, SessionStatus, SessionType as ConstellationSessionType } from '@rohit-constellation/types';
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany, VersionColumn } from 'typeorm';
 
 import { Answer } from '../answer/answer.entity';
 
@@ -7,6 +7,10 @@ import { Answer } from '../answer/answer.entity';
 export class Session {
   @PrimaryGeneratedColumn('uuid')
   id: string;
+
+  @VersionColumn()
+  version: number;
+
   @Column()
   template: string;
 
