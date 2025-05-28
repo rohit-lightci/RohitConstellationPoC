@@ -202,6 +202,7 @@ export const SESSION_EVENT = {
   QUESTION_ANSWER: 'session:question:answer',
   GET_QUESTION: 'session:get:question',
   ALL_QUESTIONS_COMPLETED: 'session:participant:all_questions_completed',
+  ERROR: 'session:error',
   // Add more as needed
 } as const;
 

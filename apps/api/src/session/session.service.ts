@@ -77,16 +77,17 @@ export class SessionService {
   }
 
   private createRetroSections(): TypesSection[] {
-    const sectionsData: Array<{ type: SectionType; order: number; goal?: string }> = [
-        { type: 'MAD', order: 1, goal: "Identify things that caused frustration or impediments." },
-        { type: 'SAD', order: 2, goal: "Identify things that were disappointing or didn't go well." },
-        { type: 'GLAD', order: 3, goal: "Identify things that went well or were positive." },
+    const sectionsData: Array<{ name: string; type: SectionType; order: number; goal?: string }> = [
+        { name: 'MAD', type: 'MAD', order: 1, goal: "Identify things that caused frustration or impediments." },
+        { name: 'SAD', type: 'SAD', order: 2, goal: "Identify things that were disappointing or didn't go well." },
+        { name: 'GLAD', type: 'GLAD', order: 3, goal: "Identify things that went well or were positive." },
     ];
 
     const sections: TypesSection[] = sectionsData.map(data => {
       const sectionId = uuidv4();
       return {
         id: sectionId,
+        name: data.name,
         type: data.type,
         order: data.order,
         goal: data.goal,

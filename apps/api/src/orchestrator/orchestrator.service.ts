@@ -4,11 +4,13 @@ import {
   Participant,
   Question,
 } from '@rohit-constellation/types';
+import OpenAI from 'openai';
 import { OptimisticLockVersionMismatchError } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 
 import { AnswerService } from '../answer/answer.service';
 import { EvaluationService } from '../evaluation/evaluation.service';
+import { LLMService } from '../llm/llm.service';
 import { SessionEventsService } from '../session/session-events.service';
 import { SessionService } from '../session/session.service';
 import { SessionCacheService } from '../session-cache/session-cache.service';
@@ -39,6 +41,7 @@ export class OrchestratorService {
     private readonly sessionService: SessionService,
     private readonly sessionEventsService: SessionEventsService,
     private readonly answerService: AnswerService,
+    private readonly llmService: LLMService,
   ) {}
 
   private getParticipantQueueCacheKey(sessionId: string, participantId: string): string {
@@ -96,13 +99,13 @@ export class OrchestratorService {
   }
 
   private async getSession(sessionId: string): Promise<Session | null> {
-    let session = this.sessionCacheService.get(sessionId);
-    if (!session) {
+    let sessionData = this.sessionCacheService.get(sessionId);
+    if (!sessionData) {
       this.logger.log(`Cache miss for session ${sessionId}. Fetching from DB.`);
       const sessionFromDb = await this.sessionService.findOne(sessionId, true); 
       if (sessionFromDb) {
-        session = sessionFromDb;
-        this.sessionCacheService.set(session);
+        sessionData = sessionFromDb;
+        this.sessionCacheService.set(sessionData);
       } else {
         this.logger.warn(`Session ${sessionId} not found in DB after cache miss.`);
         return null;
@@ -111,7 +114,7 @@ export class OrchestratorService {
       // console.log('OrchestratorService: Session from cache', session); // Optional: for heavy debugging
       this.logger.log(`Cache hit for session ${sessionId}.`);
     }
-    return session;
+    return sessionData;
   }
 
   private async persistSession(sessionInput: Session): Promise<void> {
@@ -213,35 +216,77 @@ export class OrchestratorService {
             participantCompletedSession = true;
           }
         } else { 
-          this.logger.log(`Answer insufficient for Q:${answeredQuestionObject.id}. Handling follow-up.`);
+          this.logger.log(`Answer to Q:${answeredQuestionObject.id} by P:${participantId} was insufficient. Feedback: "${evaluationResult.feedback}". Handling follow-up.`);
           let baseQuestionIdForFollowUp: string;
           let baseQuestionOrderForFollowUp: number;
+          // Variable to hold the text of the original base question for LLM prompt context
+          let originalBaseQuestionTextForLLMPrompt: string | undefined = answeredQuestionObject.text; 
 
           if (answeredQuestionObject.intent === 'FOLLOW_UP' && answeredQuestionObject.parentQuestionId) {
             baseQuestionIdForFollowUp = answeredQuestionObject.parentQuestionId;
-            const originalBaseQ = participantQueue.questions.find(q => q.id === baseQuestionIdForFollowUp && q.intent === 'BASE');
-            baseQuestionOrderForFollowUp = originalBaseQ ? originalBaseQ.order : answeredQuestionObject.order - 0.01;
+            // Find the original base question from the session data for its text
+            const originalBaseQFromSession = this.findQuestionInSessionById(session, baseQuestionIdForFollowUp);
+            if (originalBaseQFromSession) originalBaseQuestionTextForLLMPrompt = originalBaseQFromSession.text;
+            // Use order from session data, or fallback if somehow not found (should be rare)
+            baseQuestionOrderForFollowUp = originalBaseQFromSession ? originalBaseQFromSession.order : (answeredQuestionObject.order - 0.01);
           } else { 
             baseQuestionIdForFollowUp = answeredQuestionObject.id;
             baseQuestionOrderForFollowUp = answeredQuestionObject.order;
+            // For a base question, its own text is the "original" context for the first follow-up
+            originalBaseQuestionTextForLLMPrompt = answeredQuestionObject.text; 
           }
           
           participantQueue.followUpCounts[baseQuestionIdForFollowUp] = participantQueue.followUpCounts[baseQuestionIdForFollowUp] || 0;
           const currentFollowUpCountForBase = participantQueue.followUpCounts[baseQuestionIdForFollowUp];
 
           if (currentFollowUpCountForBase < this.MAX_FOLLOW_UPS) {
-            const followUpPromptText = `Follow-up for original question: Please elaborate on your answer to "${answeredQuestionObject.text.substring(0,50)}...".`;
+            this.logger.log(`Attempting to generate LLM follow-up for P:${participantId}, BaseQ:${baseQuestionIdForFollowUp} (Follow-up attempt ${currentFollowUpCountForBase + 1})`);
+
+            const llmSystemPrompt = "You are a helpful session facilitator. Your goal is to generate a concise follow-up question to elicit more specific or complete information from a participant after their previous answer was deemed insufficient. The question should be direct and easy to understand.";
+            
+            let llmUserPrompt = `The participant just answered a question, but their answer was not sufficient. Please generate a follow-up question for them.\n\n`;
+            if (answeredQuestionObject.intent === 'FOLLOW_UP') {
+                llmUserPrompt += `Context: The participant is responding to a series of questions. The original question in this series was: "${originalBaseQuestionTextForLLMPrompt}"\n`;
+                llmUserPrompt += `The previous follow-up question asked was: "${answeredQuestionObject.text}"\n`;
+            } else {
+                llmUserPrompt += `The question asked was: "${originalBaseQuestionTextForLLMPrompt}"\n`; // Use originalBaseQuestionTextForLLMPrompt here too for consistency
+            }
+            llmUserPrompt += `Participant's Insufficient Answer: "${response}"\n`;
+            llmUserPrompt += `Reason the answer was insufficient (feedback from evaluation): "${evaluationResult.feedback}"\n\n`;
+            llmUserPrompt += `Based on this, please generate a single, brief, targeted follow-up question to help the participant provide the missing information or elaborate appropriately. Do not be conversational, just provide the question text.`;
+
+            const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
+                { role: 'system', content: llmSystemPrompt },
+                { role: 'user', content: llmUserPrompt },
+            ];
+
+            let llmGeneratedFollowUpText = '';
+            try {
+                llmGeneratedFollowUpText = await this.llmService.generateChatCompletion(messages, undefined, 0.5); // temp 0.5 for focused Qs
+                llmGeneratedFollowUpText = llmGeneratedFollowUpText.replace(/^"|"$/g, '').trim(); // Clean quotes and trim
+            } catch (llmError) {
+                this.logger.error(`LLM call for follow-up generation failed: ${llmError instanceof Error ? llmError.message : String(llmError)}`);
+            }
+
+            if (!llmGeneratedFollowUpText) {
+                this.logger.warn('LLM failed to generate follow-up question text or returned empty. Falling back to generic prompt.');
+                // Fallback incorporates evaluation feedback if available
+                const fallbackDetail = evaluationResult.feedback ? `Specifically, consider: ${evaluationResult.feedback}` : 'Please provide more detail.';
+                llmGeneratedFollowUpText = `Please elaborate further on your previous answer regarding "${answeredQuestionObject.text.substring(0,50)}...". ${fallbackDetail}`;
+            }
+            
             const newFollowUpOrder = parseFloat((baseQuestionOrderForFollowUp + (currentFollowUpCountForBase + 1) / 100).toFixed(4));
             
             const generatedFollowUp: Question = {
               id: uuidv4(),
-              text: followUpPromptText,
+              text: llmGeneratedFollowUpText,
               type: answeredQuestionObject.type,
               intent: 'FOLLOW_UP',
               sectionId: answeredQuestionObject.sectionId,
               parentQuestionId: baseQuestionIdForFollowUp,
               generatedForParticipantId: participant.id,
               order: newFollowUpOrder,
+              goal: `To clarify or expand upon the previous insufficient answer related to: ${originalBaseQuestionTextForLLMPrompt?.substring(0,70)}...`, // Add a goal for the FU
             };
             newFollowUpQuestionForSessionPersistence = generatedFollowUp;
 
@@ -249,13 +294,30 @@ export class OrchestratorService {
             participantQueue.followUpCounts[baseQuestionIdForFollowUp]++;
             participantQueue.currentQuestionIndex++; 
             nextQuestion = newFollowUpQuestionForSessionPersistence;
-            this.logger.log(`Generated FU Q:${nextQuestion.id} for P:${participant.id}. Will be added to session persistence.`);
+            this.logger.log(`Generated LLM-based FU Q:${nextQuestion.id} ("${nextQuestion.text.substring(0,50)}...") for P:${participant.id}.`);
           } else {
-            this.logger.log(`Max follow-ups (${this.MAX_FOLLOW_UPS}) reached for base Q:${baseQuestionIdForFollowUp}. Advancing in P-Queue.`);
-            participantQueue.currentQuestionIndex++;
-            if (participantQueue.currentQuestionIndex < participantQueue.questions.length) {
-              nextQuestion = participantQueue.questions[participantQueue.currentQuestionIndex];
+            this.logger.log(`Max follow-ups (${this.MAX_FOLLOW_UPS}) reached for base Q:${baseQuestionIdForFollowUp}. Advancing to next base question or completing participant.`);
+            
+            const ultimateBaseQuestionId = (answeredQuestionObject.intent === 'FOLLOW_UP' && answeredQuestionObject.parentQuestionId) 
+                                            ? answeredQuestionObject.parentQuestionId 
+                                            : answeredQuestionObject.id;
+
+            const nextBaseQuestionObject = this.findNextBaseQuestionInQueue(participantQueue, ultimateBaseQuestionId);
+
+            if (nextBaseQuestionObject) {
+              const nextBaseQuestionIndexInQueue = participantQueue.questions.findIndex(
+                q => q.id === nextBaseQuestionObject.id && q.intent === 'BASE'
+              );
+              if (nextBaseQuestionIndexInQueue !== -1) {
+                participantQueue.currentQuestionIndex = nextBaseQuestionIndexInQueue;
+                nextQuestion = participantQueue.questions[nextBaseQuestionIndexInQueue];
+                this.logger.log(`Max follow-ups for ${ultimateBaseQuestionId} reached. Advancing to next base question Q:${nextQuestion.id}`);
+              } else {
+                this.logger.error(`Could not find the next base question (ID: ${nextBaseQuestionObject.id}) in the current P-Queue for P:${participantId}, though it was found in base order. Completing participant as a fallback.`);
+                participantCompletedSession = true;
+              }
             } else {
+              this.logger.log(`Max follow-ups for ${ultimateBaseQuestionId} reached, and no more base questions in queue for P:${participantId}. Completing participant.`);
               participantCompletedSession = true;
             }
           }
@@ -288,45 +350,54 @@ export class OrchestratorService {
         if (newFollowUpQuestionForSessionPersistence) {
           const sectionToUpdate = session.sections.find(s => s.id === newFollowUpQuestionForSessionPersistence!.sectionId);
           if (sectionToUpdate) {
-            sectionToUpdate.questions.push(newFollowUpQuestionForSessionPersistence);
-            sectionToUpdate.questions.sort((a,b) => a.order - b.order);
-            this.logger.log(`Added generated FU Q:${newFollowUpQuestionForSessionPersistence.id} to section ${sectionToUpdate.id} for persistence.`);
+             if (!sectionToUpdate.questions.find(q => q.id === newFollowUpQuestionForSessionPersistence!.id)) {
+                sectionToUpdate.questions.push(newFollowUpQuestionForSessionPersistence);
+                sectionToUpdate.questions.sort((a,b) => a.order - b.order);
+                this.logger.log(`Added generated FU Q:${newFollowUpQuestionForSessionPersistence.id} to section ${sectionToUpdate.id} for persistence.`);
+             } else {
+                this.logger.log(`FU Q:${newFollowUpQuestionForSessionPersistence.id} already present in section ${sectionToUpdate.id}. Not re-adding.`);
+             }
           } else {
             this.logger.error(`Could not find section ${newFollowUpQuestionForSessionPersistence.sectionId} to add FU question.`);
           }
         }
         
-        if (participantCompletedSession) {
+        if (participantCompletedSession && participant) {
           participant.status = 'COMPLETED';
+          participant.completedAt = new Date();
+          participant.currentQuestion = '';
+          participant.currentSection = '';
           this.logger.log(`P:${participant.id} in S:${sessionId} has completed all questions.`);
-        } else {
-          participant.currentQuestion = nextQuestion?.id || ''; // Assign question ID or empty string
+        } else if (nextQuestion && participant) {
+          participant.currentQuestion = nextQuestion.id;
+          participant.currentSection = nextQuestion.sectionId;
+          participant.status = 'ACTIVE';
         }
-        // participant.version +=1; // Removed: Participant type doesn't have version
-        session.version +=1;
         
-        await this.persistSession(session);
+        if (session) {
+            session.version +=1;
+            await this.persistSession(session);
+        }
         await this.setParticipantQueue(sessionId, participantId, participantQueue);
 
-        // Corrected emitParticipantStatus call
-        this.sessionEventsService.emitParticipantStatus(sessionId, participant.id, participant.status);
-        // Removed emitSessionStateToAll as it doesn't exist on SessionEventsService.
-        // Session state updates will be handled by specific events or by session completion flow.
+        if (participant) {
+            this.sessionEventsService.emitParticipantStatus(sessionId, participant.id, participant.status, participant.currentQuestion, participant.currentSection);
+        }
 
-        if (participantCompletedSession) {
-          this.logger.log(`P:${participantId} COMPLETED. Emitting ParticipantStatus.`);
-          // emitParticipantStatus already called above, no need to repeat unless a different status is needed.
-          // this.sessionEventsService.emitParticipantStatus(sessionId, participant.id, 'COMPLETED'); 
-          if (session.participants.every(p => p.status === 'COMPLETED')) {
-            this.logger.log(`All participants in S:${sessionId} have completed. Completing session.`);
+        if (participantCompletedSession && session && participant) {
+          this.logger.log(`P:${participant.id} COMPLETED. Checking if session is complete.`);
+          const activeOrPendingParticipants = session.participants.filter(p => p.status !== 'COMPLETED' && p.status !== 'INACTIVE');
+
+          if (activeOrPendingParticipants.length === 0 && session.participants.some(p => p.status === 'COMPLETED')) { 
+            this.logger.log(`All active/pending participants in S:${sessionId} have completed. Completing session.`);
             await this.sessionService.completeSession(sessionId); 
           }
-        } else if (nextQuestion) {
-          this.logger.log(`Next question for P:${participantId} is Q:${nextQuestion.id}. Emitting QuestionReady.`);
-          this.sessionEventsService.emitQuestionReady(sessionId, participantId, nextQuestion);
-        } else {
-          this.logger.error(`P:${participantId} is not completed, but no next question was determined. This should not happen.`);
-          this.sessionEventsService.emitParticipantStatus(sessionId, participantId, participant.status); 
+        } else if (nextQuestion && participant) {
+          this.logger.log(`Next question for P:${participant.id} is Q:${nextQuestion.id}. Emitting QuestionReady.`);
+          this.sessionEventsService.emitQuestionReady(sessionId, participant.id, nextQuestion);
+        } else if (participant && !participantCompletedSession && !nextQuestion) {
+          this.logger.error(`P:${participant.id} is not completed, but no next question was determined. Current status: ${participant.status}. This may indicate an issue.`);
+          this.sessionEventsService.emitParticipantStatus(sessionId, participant.id, participant.status, participant.currentQuestion, participant.currentSection);
         }
         
         return; 
@@ -341,8 +412,10 @@ export class OrchestratorService {
             this.logger.error(
               `Max retries reached for S:${sessionId} due to optimistic lock. Answer processing failed. P:${participantId}, Q:${answeredQuestionId}`,
             );
-            // Replaced emitErrorToParticipant with logging
-            this.logger.error(`[User Error] Failed to process answer for P:${participantId} due to a server conflict. (S:${sessionId}, Q:${answeredQuestionId})`);
+            if (participant) {
+              // this.sessionEventsService.emitErrorToParticipant(sessionId, participantId, 'Failed to process your answer due to a server conflict. Please try again or contact support.');
+              this.logger.error(`TODO: Emit actual error to P:${participantId} - Failed to process answer due to server conflict.`);
+            }
             return;
           }
         } else {
@@ -351,8 +424,10 @@ export class OrchestratorService {
             `Unexpected error processing answer for S:${sessionId}, P:${participantId}, Q:${answeredQuestionId} (Attempt ${retries + 1}): ${errorMessage}`,
             error instanceof Error ? error.stack : undefined
           );
-          // Replaced emitErrorToParticipant with logging
-          this.logger.error(`[User Error] An unexpected error occurred while processing answer for P:${participantId}. (S:${sessionId}, Q:${answeredQuestionId})`);
+          if (participant) {
+            // this.sessionEventsService.emitErrorToParticipant(sessionId, participantId, 'An unexpected error occurred while processing your answer. Please try again or contact support.');
+            this.logger.error(`TODO: Emit actual error to P:${participantId} - Unexpected error occurred.`);
+          }
           return; 
         }
       }
@@ -364,6 +439,7 @@ export class OrchestratorService {
     const session = await this.getSession(sessionId);
     if (!session) {
       this.logger.error(`S:${sessionId} not found. Cannot get next question.`);
+      // if (participantId) this.sessionEventsService.emitErrorToParticipant(sessionId, participantId, 'Session not found.');
       return null;
     }
 
@@ -375,50 +451,64 @@ export class OrchestratorService {
     
     if (participant.status === 'COMPLETED') {
       this.logger.log(`P:${participantId} is already COMPLETED. No next question.`);
-      this.sessionEventsService.emitParticipantStatus(sessionId, participantId, 'COMPLETED');
+      this.sessionEventsService.emitParticipantStatus(sessionId, participantId, 'COMPLETED', '', '');
       return null;
     }
 
     let participantQueue = await this.getParticipantQueue(sessionId, participantId);
     if (!participantQueue || participantQueue.questions.length === 0 || participantQueue.currentQuestionIndex >= participantQueue.questions.length) {
-      this.logger.log(`No existing or valid queue for P:${participantId}. Initializing/Re-initializing...`);
+      this.logger.log(`No existing/valid queue for P:${participantId}, or participant is at end of initialized queue. Initializing/Re-initializing...`);
       participantQueue = await this.initializeParticipantQueue(session, participant);
-      if (!participantQueue) {
-        this.logger.error(`Failed to initialize queue for P:${participantId}. Cannot determine next question.`);
-        this.sessionEventsService.emitParticipantStatus(sessionId, participantId, participant.status); 
+      if (!participantQueue || participantQueue.questions.length === 0) { 
+        this.logger.error(`Failed to initialize queue or queue is empty for P:${participantId}. Cannot determine next question.`);
+        this.sessionEventsService.emitParticipantStatus(sessionId, participant.id, participant.status, participant.currentQuestion, participant.currentSection); 
         return null;
       }
     }
     
     const nextQuestion = participantQueue.questions[participantQueue.currentQuestionIndex];
     
-    if (nextQuestion) {
+    if (nextQuestion && participant) { // Ensure participant exists
         this.logger.log(`Next question for P:${participantId} is Q:${nextQuestion.id} from queue index ${participantQueue.currentQuestionIndex}.`);
-        // Ensure participant.currentQuestion is updated before emitting, though processParticipantAnswer should handle primary state changes.
-        // participant.currentQuestion = nextQuestion.id; // This might be redundant if processParticipantAnswer is the sole mutator.
+        
+        participant.currentQuestion = nextQuestion.id;
+        participant.currentSection = nextQuestion.sectionId;
+        // participant.status = 'ACTIVE'; // Status should be set by processParticipantAnswer or session activation
+
         this.sessionEventsService.emitQuestionReady(sessionId, participantId, nextQuestion);
         return nextQuestion;
     } else {
-        this.logger.warn(`P:${participantId} in S:${sessionId}: No next question found in queue, but status is not COMPLETED. This might indicate end of queue.`);
-        if(participantQueue.currentQuestionIndex >= participantQueue.questions.length ){
+        this.logger.warn(`P:${participantId} in S:${sessionId}: No next question found in queue at index ${participantQueue?.currentQuestionIndex}, but status is not COMPLETED. This might indicate end of queue.`);
+        if(participant && participantQueue && participantQueue.currentQuestionIndex >= participantQueue.questions.length ){
             participant.status = 'COMPLETED';
-            participant.currentQuestion = ''; // Clear current question
+            participant.currentQuestion = ''; 
+            participant.currentSection = '';
+            participant.completedAt = new Date();
             try {
-              session.version += 1;
-              // participant.version +=1; // Removed
-              await this.persistSession(session);
-              await this.setParticipantQueue(sessionId, participantId, participantQueue);
-              this.sessionEventsService.emitParticipantStatus(sessionId, participant.id, 'COMPLETED');
-              // No emitSessionStateToAll here directly
-              this.logger.log(`P:${participantId} marked COMPLETED in getNextQuestion as end of queue was reached.`);
+              if (session) {
+                session.version += 1;
+                await this.persistSession(session); 
+              }
+              await this.setParticipantQueue(sessionId, participantId, participantQueue); 
+              this.sessionEventsService.emitParticipantStatus(sessionId, participant.id, 'COMPLETED', '', '');
+              this.logger.log(`P:${participantId} marked COMPLETED in getNextQuestion as end of queue was reached and no next Q object.`);
+              
+              if (session && session.participants.filter(p => p.status !== 'COMPLETED' && p.status !== 'INACTIVE').length === 0 && session.participants.some(p=>p.status === 'COMPLETED')) {
+                this.logger.log(`All active/pending participants in S:${sessionId} have completed after P:${participantId} finished. Completing session.`);
+                await this.sessionService.completeSession(sessionId);
+              }
             } catch (error) {
               this.logger.error(`Error persisting COMPLETED status for P:${participantId} in getNextQuestion: ${error}`);
             }
+        } else if (participant) { 
+             this.sessionEventsService.emitParticipantStatus(sessionId, participant.id, participant.status, participant.currentQuestion, participant.currentSection);
         }
         return null;
     }
   }
 
+  // Renamed from findQuestionById to avoid conflict if another service uses it more generically
+  // This one is specific to finding within the session structure passed to orchestrator methods.
   private findQuestionById(session: Session, questionId: string): Question | undefined {
     if (!questionId) return undefined;
     for (const section of session.sections) {
@@ -426,6 +516,16 @@ export class OrchestratorService {
       if (question) return question;
     }
     this.logger.warn(`(Legacy find) Question with ID ${questionId} not found in any section of session ${session.id}`);
+    return undefined;
+  }
+
+  // Helper to find a question by ID from the session object (used for context)
+  private findQuestionInSessionById(session: Session, questionId: string): Question | undefined {
+    for (const section of session.sections) {
+      const found = section.questions.find(q => q.id === questionId);
+      if (found) return found;
+    }
+    // this.logger.warn(`(Orchestrator specific find) Question with ID ${questionId} not found in any section of session ${session.id}`);
     return undefined;
   }
 }

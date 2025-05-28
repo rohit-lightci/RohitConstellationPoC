@@ -7,6 +7,7 @@ import { AppService } from "./app.service";
 import { databaseConfig } from './config/database.config';
 import { EmbeddingModule } from './embedding/embedding.module';
 import { HealthcheckModule } from "./healthcheck/healthcheck.module";
+import { LLMModule } from './llm/llm.module';
 import { SessionModule } from './session/session.module';
 
 @Module({
@@ -15,9 +16,10 @@ import { SessionModule } from './session/session.module';
             isGlobal: true,
         }),
         TypeOrmModule.forRoot(databaseConfig),
+        EmbeddingModule,
         HealthcheckModule,
         SessionModule,
-        EmbeddingModule,
+        LLMModule,
     ],
     controllers: [AppController],
     providers: [AppService],
