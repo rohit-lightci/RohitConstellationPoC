@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { Session, Participant, Question } from '@rohit-constellation/types';
+import { Question } from '@rohit-constellation/types';
 import OpenAI from 'openai'; // Import OpenAI type
 
 import { LLMService } from '../llm/llm.service'; // Import LLMService
@@ -17,81 +17,50 @@ export class EvaluationService {
 
   constructor(private readonly llmService: LLMService) {} // Inject LLMService
 
-  private findQuestionById(session: Session, questionId: string): Question | undefined {
-    // Helper to find the original base question for context
-    for (const section of session.sections) {
-      const found = section.questions.find(q => q.id === questionId);
-      if (found) return found;
-    }
-    // Check session-level generated questions if any (though typically questions are in sections)
-    // This part might need adjustment based on where all questions could be stored.
-    // For now, assuming questions are always within sections as per current session structure.
-    return undefined;
-  }
-
   async evaluateAnswer(
-    session: Session,
-    participant: Participant,
-    question: Question,
+    sessionTitle: string,
+    sessionDescription: string | undefined,
+    participantAssignedRole: string, // 'PARTICIPANT' or 'HOST'
+    question: Question, // Current question being answered
     response: string | number,
+    originalQuestionTextContext?: string, // Text of the ultimate base question if current is a follow-up
+    sectionGoalContext?: string // Goal of the current section
   ): Promise<{ isSufficient: boolean; feedback?: string; score?: number }> {
     this.logger.log(
-      `Evaluating P:${participant.id}'s answer to Q:${question.id} (Intent: ${question.intent}) in S:${session.id} (Response: ${response}) using LLM.`, 
+      `Evaluating P-Role:${participantAssignedRole}'s answer to Q:${question.id} (Intent: ${question.intent}) in Session:"${sessionTitle}" (Response: ${response}) using LLM.`, 
     );
 
-    // // Removed: We now evaluate follow-up answers as well.
-    // if (question.intent === 'FOLLOW_UP') {
-    //   this.logger.log(`Q:${question.id} is a FOLLOW_UP. Marking as sufficient by default.`);
-    //   return { isSufficient: true, feedback: 'Follow-up answer processed.' };
-    // }
-
-    const section = session.sections.find(s => s.id === question.sectionId);
-    let originalQuestionText: string | undefined = undefined;
-
-    if (question.intent === 'FOLLOW_UP' && question.parentQuestionId) {
-      const originalQuestion = this.findQuestionById(session, question.parentQuestionId);
-      if (originalQuestion) {
-        originalQuestionText = originalQuestion.text;
-        this.logger.log(`Current question Q:${question.id} is a follow-up to Q:${question.parentQuestionId} ("${originalQuestionText}")`);
-      } else {
-        this.logger.warn(`Could not find parent question ${question.parentQuestionId} for follow-up Q:${question.id}`);
-      }
-    }
-
     const systemPrompt = `You are an AI assistant evaluating the sufficiency of a participant's answer to a question within a collaborative session.
+    The overall goal of this session (titled '${sessionTitle}') is: ${sessionDescription || 'Not specified'}.
+    The participant submitting this answer has the role of '${participantAssignedRole}'.
     Your goal it determine the qualitaive OR quantitative measure of the answer and understand WHY and core of the problem to get more insights.
 Your response MUST be a JSON object with the following structure: {"isSufficient": boolean, "feedback": "string"}. 
 - 'isSufficient' should be true if the answer adequately addresses the question(s) and its goals, and false otherwise.
 - 'feedback' should be a concise message for the participant, explaining why the answer was deemed sufficient or insufficient, or suggesting areas for improvement if applicable.`;
 
-    let userMessageContent = `Please evaluate the following answer based on the provided context.
+    let userMessageContent = `Please evaluate the following answer based on the provided context.\n\n`;
 
-`;
-
-    if (originalQuestionText) {
-      userMessageContent += `Original Question: "${originalQuestionText}"\n`;
-      userMessageContent += `Current Follow-up Question: "${question.text}"\n`;
+    if (originalQuestionTextContext && question.intent === 'FOLLOW_UP') {
+      userMessageContent += `Original Base Question: "${originalQuestionTextContext}"\n`;
+      userMessageContent += `Current Follow-up Question Asked: "${question.text}"\n`;
     } else {
-      userMessageContent += `Question: "${question.text}"\n`;
+      userMessageContent += `Question Asked: "${question.text}"\n`;
     }
 
     if (question.goal) {
-      userMessageContent += `Question Goal: "${question.goal}"\n`;
+      userMessageContent += `Specific Goal of this Question: "${question.goal}"\n`;
     }
-    if (section?.goal) {
-      userMessageContent += `Section Goal: "${section.goal}"\n`;
+    if (sectionGoalContext) {
+      userMessageContent += `Goal of the Current Section: "${sectionGoalContext}"\n`;
     }
-    userMessageContent += `
-Participant's Answer: "${response}"
-
-Is this answer sufficient given the question(s) and goals? Provide feedback. Remember to respond only with the specified JSON object.`;
+    userMessageContent += `\nParticipant's Answer: "${response}"\n\nIs this answer sufficient given the question(s) and goals? Provide feedback. Remember to respond only with the specified JSON object.`;
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: userMessageContent },
     ];
 
-    console.log('messages >>>>>>>>>>>>>>', messages);
+    // console.log('messages >>>>>>>>>>>>>>', messages); // Keep for debugging if needed
 
     try {
       const llmResponseString = await this.llmService.generateChatCompletion(messages);

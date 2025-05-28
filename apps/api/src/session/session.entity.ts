@@ -68,4 +68,7 @@ export class Session {
 
   @OneToMany(() => Answer, answer => answer.session, { cascade: true, eager: false })
   answers: Answer[];
+
+  @Column({ type: 'text', nullable: true })
+  generatedReportJson?: string;
 }

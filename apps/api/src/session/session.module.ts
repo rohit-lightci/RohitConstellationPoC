@@ -1,7 +1,9 @@
 import { Module, forwardRef } from '@nestjs/common';
 import { TypeOrmModule } from '@nestjs/typeorm';
 
+import { Answer } from '../answer/answer.entity';
 import { AnswerModule } from '../answer/answer.module';
+import { HighlightModule } from '../highlight/highlight.module';
 import { OrchestratorModule } from '../orchestrator/orchestrator.module';
 
 import { SessionEventsService } from './session-events.service';
@@ -12,8 +14,9 @@ import { SessionService } from './session.service';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Session]),
+    TypeOrmModule.forFeature([Session, Answer]),
     AnswerModule,
+    HighlightModule,
     forwardRef(() => OrchestratorModule),
   ],
   controllers: [SessionController],

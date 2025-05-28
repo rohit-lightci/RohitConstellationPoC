@@ -17,6 +17,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { CreateAnswerDto } from '../answer/answer.dto';
 import { Answer } from '../answer/answer.entity';
 import { AnswerService } from '../answer/answer.service';
+import { HighlightService } from '../highlight/highlight.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
 
 import { SessionEventsService } from './session-events.service';
@@ -31,8 +32,11 @@ export class SessionService {
     private sessionRepository: Repository<Session>,
     private readonly eventsService: SessionEventsService,
     private readonly answerService: AnswerService,
+    private readonly highlightService: HighlightService,
     @Inject(forwardRef(() => OrchestratorService))
     private readonly orchestratorService: OrchestratorService,
+    @InjectRepository(Answer)
+    private readonly answerRepository: Repository<Answer>,
   ) {}
 
   private mapEntityToType(sessionEntity: Session): TypesSession {
@@ -131,18 +135,24 @@ export class SessionService {
   }
   
   async save(sessionData: TypesSession): Promise<TypesSession> {
-    this.logger.log(`Saving session ${sessionData.id} from orchestrator/cache.`);
+    this.logger.log(`Saving session ${sessionData.id} from orchestrator/cache or direct call.`);
     let entityToSave: Session;
     const existingEntity = await this.sessionRepository.findOne({ where: { id: sessionData.id }});
 
     if (existingEntity) {
-        entityToSave = this.sessionRepository.merge(existingEntity, sessionData as unknown as Partial<Session>);
+        const updateData = { ...sessionData } as Partial<Session>;
+        if (typeof (sessionData as any).generatedReportJson === 'string') {
+            updateData.generatedReportJson = (sessionData as any).generatedReportJson;
+        }
+        entityToSave = this.sessionRepository.merge(existingEntity, updateData);
         entityToSave.participants = sessionData.participants as any[];
         entityToSave.sections = sessionData.sections as any[];
-
     } else {
         this.logger.warn(`Session ${sessionData.id} not found in DB during save. Creating new entity from data.`);
         entityToSave = this.sessionRepository.create(sessionData as unknown as Session);
+        if (typeof (sessionData as any).generatedReportJson === 'string') {
+            entityToSave.generatedReportJson = (sessionData as any).generatedReportJson;
+        }
     }
     
     const savedEntity = await this.sessionRepository.save(entityToSave);
@@ -180,10 +190,50 @@ export class SessionService {
   }
 
   async completeSession(id: string): Promise<TypesSession> {
-    const session = await this.findOne(id);
-    if (!session) throw new NotFoundException('Session not found');
-    session.status = 'COMPLETED';
-    return this.save(session);
+    this.logger.log(`Attempting to complete session S:${id} and generate report.`);
+    const sessionEntity = await this.sessionRepository.findOne({ where: { id } });
+
+    if (!sessionEntity) {
+      this.logger.error(`Session S:${id} not found for completion.`);
+      throw new NotFoundException('Session not found');
+    }
+
+    if (sessionEntity.status === 'COMPLETED') {
+      this.logger.warn(`Session S:${id} is already marked as COMPLETED. Skipping report generation.`);
+      return this.mapEntityToType(sessionEntity);
+    }
+    
+    const allAnswersForSession = await this.answerRepository.findBy({ sessionId: id });
+
+    this.logger.log(`Found ${allAnswersForSession.length} answers for S:${id} to include in report generation.`);
+
+    try {
+      const report = await this.highlightService.generateReport({
+        session: sessionEntity,
+        answers: allAnswersForSession,
+      });
+
+      if (report) {
+        sessionEntity.generatedReportJson = JSON.stringify(report);
+        this.logger.log(`Successfully generated report for S:${id}.`);
+      } else {
+        this.logger.warn(`Report generation returned null for S:${id}. Session will be completed without a report.`);
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Error during report generation for S:${id}: ${errorMessage}. Session will be completed without a report.`,
+        error instanceof Error ? error.stack : undefined,
+      );
+    }
+
+    sessionEntity.status = 'COMPLETED';
+    
+    const savedSessionEntity = await this.sessionRepository.save(sessionEntity);
+    this.logger.log(`Session S:${id} successfully marked as COMPLETED ${sessionEntity.generatedReportJson ? 'with' : 'without'} a generated report. New version: ${savedSessionEntity.version}`);
+    
+    this.eventsService.emitSessionState(id, this.mapEntityToType(savedSessionEntity));
+    return this.mapEntityToType(savedSessionEntity);
   }
 
   async addParticipant(sessionId: string, name: string, role: 'PARTICIPANT' | 'HOST' = 'PARTICIPANT'): Promise<TypesSession> {
