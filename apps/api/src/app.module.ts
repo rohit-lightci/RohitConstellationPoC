@@ -5,6 +5,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { AppController } from "./app.controller";
 import { AppService } from "./app.service";
 import { databaseConfig } from './config/database.config';
+import { EmbeddingModule } from './embedding/embedding.module';
 import { HealthcheckModule } from "./healthcheck/healthcheck.module";
 import { SessionModule } from './session/session.module';
 
@@ -15,7 +16,8 @@ import { SessionModule } from './session/session.module';
         }),
         TypeOrmModule.forRoot(databaseConfig),
         HealthcheckModule,
-        SessionModule
+        SessionModule,
+        EmbeddingModule,
     ],
     controllers: [AppController],
     providers: [AppService],

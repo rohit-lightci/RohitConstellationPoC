@@ -7,6 +7,7 @@ import {
 import { OptimisticLockVersionMismatchError } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 
+import { AnswerService } from '../answer/answer.service';
 import { EvaluationService } from '../evaluation/evaluation.service';
 import { SessionEventsService } from '../session/session-events.service';
 import { SessionService } from '../session/session.service';
@@ -37,6 +38,7 @@ export class OrchestratorService {
     @Inject(forwardRef(() => SessionService))
     private readonly sessionService: SessionService,
     private readonly sessionEventsService: SessionEventsService,
+    private readonly answerService: AnswerService,
   ) {}
 
   private getParticipantQueueCacheKey(sessionId: string, participantId: string): string {
@@ -106,7 +108,7 @@ export class OrchestratorService {
         return null;
       }
     } else {
-      console.log('OrchestratorService: Session from cache', session);
+      // console.log('OrchestratorService: Session from cache', session); // Optional: for heavy debugging
       this.logger.log(`Cache hit for session ${sessionId}.`);
     }
     return session;
@@ -124,7 +126,9 @@ export class OrchestratorService {
     participantId: string,
     answeredQuestionId: string,
     response: string | number,
+    answerId: string,
   ): Promise<void> {
+    this.logger.log(`Orchestrator: Processing answer ${answerId} for P:${participantId}, Q:${answeredQuestionId} in S:${sessionId}.`);
     let retries = 0;
     let participantQueue: ParticipantQueueCache | null = null;
     let newFollowUpQuestionForSessionPersistence: Question | null = null;
@@ -246,85 +250,172 @@ export class OrchestratorService {
             participantQueue.currentQuestionIndex++; 
             nextQuestion = newFollowUpQuestionForSessionPersistence;
             this.logger.log(`Generated FU Q:${nextQuestion.id} for P:${participant.id}. Will be added to session persistence.`);
-          } else { 
-            this.logger.log(`Max FUs for P:${participant.id} on BaseQ:${baseQuestionIdForFollowUp}. Finding next base.`);
-            const baseOfCurrent = answeredQuestionObject.intent === 'FOLLOW_UP' && answeredQuestionObject.parentQuestionId ? answeredQuestionObject.parentQuestionId : answeredQuestionObject.id;
-            const nextBaseQ = this.findNextBaseQuestionInQueue(participantQueue, baseOfCurrent);
-            if (nextBaseQ) {
-                const idx = participantQueue.questions.findIndex(q => q.id === nextBaseQ.id);
-                if (idx !== -1) {
-                    participantQueue.currentQuestionIndex = idx;
-                    nextQuestion = participantQueue.questions[idx];
-                } else { 
-                     participantCompletedSession = true; 
-                }
-            } else { 
+          } else {
+            this.logger.log(`Max follow-ups (${this.MAX_FOLLOW_UPS}) reached for base Q:${baseQuestionIdForFollowUp}. Advancing in P-Queue.`);
+            participantQueue.currentQuestionIndex++;
+            if (participantQueue.currentQuestionIndex < participantQueue.questions.length) {
+              nextQuestion = participantQueue.questions[participantQueue.currentQuestionIndex];
+            } else {
               participantCompletedSession = true;
             }
           }
         }
 
-        if (newFollowUpQuestionForSessionPersistence && session) {
-            const sectionToUpdate = session.sections.find(s => s.id === newFollowUpQuestionForSessionPersistence!.sectionId);
-            if (sectionToUpdate) {
-                if (!sectionToUpdate.questions.find(q => q.id === newFollowUpQuestionForSessionPersistence!.id)) {
-                    sectionToUpdate.questions.push(newFollowUpQuestionForSessionPersistence);
-                    sectionToUpdate.questions.sort((a, b) => a.order - b.order);
-                    this.logger.log(`Added new FU Q:${newFollowUpQuestionForSessionPersistence.id} to S:${session.id} sections for persistence.`);
-                }
+        // ---- START: Similarity Search Logic ----
+        try {
+          const currentAnswerEntity = await this.answerService.findOne(answerId);
+          if (currentAnswerEntity && currentAnswerEntity.embedding && currentAnswerEntity.embedding !== '[]') { // Add zero vector check from AnswerService if available
+            this.logger.log(`Answer ${answerId} has an embedding. Performing similarity search.`);
+            const similarAnswers = await this.answerService.findSimilarAnswers(
+              currentAnswerEntity.embedding,
+              5, 
+              sessionId,
+              answerId 
+            );
+            if (similarAnswers && similarAnswers.length > 0) {
+              this.logger.log(`Found ${similarAnswers.length} similar answers to A:${answerId}. IDs: ${similarAnswers.map(a => a.id).join(', ')}`);
             } else {
-                this.logger.error(`Section ${newFollowUpQuestionForSessionPersistence.sectionId} not found in S:${session.id} to add new FU Q:${newFollowUpQuestionForSessionPersistence.id}`);
+              this.logger.log(`No similar answers found for A:${answerId}.`);
             }
+          } else {
+            this.logger.log(`Answer ${answerId} does not have a valid embedding yet or it is a zero vector. Skipping similarity search.`);
+          }
+        } catch (simSearchError) {
+          this.logger.error(`Error during similarity search for answer ${answerId}: ${simSearchError instanceof Error ? simSearchError.message : String(simSearchError)}`);
         }
+        // ---- END: Similarity Search Logic ----
 
-        if (nextQuestion && participant) {
-          participant.currentQuestion = nextQuestion.id;
-          participant.currentSection = nextQuestion.sectionId;
-          participant.status = 'ACTIVE';
-        } else if (participantCompletedSession && participant) {
-          participant.status = 'COMPLETED';
-          participant.completedAt = new Date();
+        if (newFollowUpQuestionForSessionPersistence) {
+          const sectionToUpdate = session.sections.find(s => s.id === newFollowUpQuestionForSessionPersistence!.sectionId);
+          if (sectionToUpdate) {
+            sectionToUpdate.questions.push(newFollowUpQuestionForSessionPersistence);
+            sectionToUpdate.questions.sort((a,b) => a.order - b.order);
+            this.logger.log(`Added generated FU Q:${newFollowUpQuestionForSessionPersistence.id} to section ${sectionToUpdate.id} for persistence.`);
+          } else {
+            this.logger.error(`Could not find section ${newFollowUpQuestionForSessionPersistence.sectionId} to add FU question.`);
+          }
         }
         
+        if (participantCompletedSession) {
+          participant.status = 'COMPLETED';
+          this.logger.log(`P:${participant.id} in S:${sessionId} has completed all questions.`);
+        } else {
+          participant.currentQuestion = nextQuestion?.id || ''; // Assign question ID or empty string
+        }
+        // participant.version +=1; // Removed: Participant type doesn't have version
+        session.version +=1;
+        
+        await this.persistSession(session);
         await this.setParticipantQueue(sessionId, participantId, participantQueue);
-        if (session) await this.persistSession(session); 
+
+        // Corrected emitParticipantStatus call
+        this.sessionEventsService.emitParticipantStatus(sessionId, participant.id, participant.status);
+        // Removed emitSessionStateToAll as it doesn't exist on SessionEventsService.
+        // Session state updates will be handled by specific events or by session completion flow.
 
         if (participantCompletedSession) {
-          this.sessionEventsService.emitParticipantStatus(sessionId, participantId, 'COMPLETED');
+          this.logger.log(`P:${participantId} COMPLETED. Emitting ParticipantStatus.`);
+          // emitParticipantStatus already called above, no need to repeat unless a different status is needed.
+          // this.sessionEventsService.emitParticipantStatus(sessionId, participant.id, 'COMPLETED'); 
+          if (session.participants.every(p => p.status === 'COMPLETED')) {
+            this.logger.log(`All participants in S:${sessionId} have completed. Completing session.`);
+            await this.sessionService.completeSession(sessionId); 
+          }
         } else if (nextQuestion) {
-          this.sessionEventsService.emitQuestionReady(sessionId, participant.id, nextQuestion);
+          this.logger.log(`Next question for P:${participantId} is Q:${nextQuestion.id}. Emitting QuestionReady.`);
+          this.sessionEventsService.emitQuestionReady(sessionId, participantId, nextQuestion);
+        } else {
+          this.logger.error(`P:${participantId} is not completed, but no next question was determined. This should not happen.`);
+          this.sessionEventsService.emitParticipantStatus(sessionId, participantId, participant.status); 
         }
-
-        this.logger.log(`Successfully processed answer for S:${sessionId}, P:${participantId}, Q:${answeredQuestionId} on attempt ${retries + 1}.`);
-        return;
-
+        
+        return; 
       } catch (error) {
         if (error instanceof OptimisticLockVersionMismatchError) {
-          retries++;
           this.logger.warn(
-            `Optimistic lock error for S:${sessionId}, P:${participantId} on attempt ${retries}. Retrying...`,
+            `Optimistic lock error for S:${sessionId} (Attempt ${retries + 1}). Retrying operation...`,
           );
-          participantQueue = null;
+          retries++;
+          participantQueue = null; 
           if (retries >= this.MAX_PROCESS_ANSWER_RETRIES) {
             this.logger.error(
-              `Max retries (${this.MAX_PROCESS_ANSWER_RETRIES}) reached for S:${sessionId}, P:${participantId} due to optimistic lock. Giving up.`,
+              `Max retries reached for S:${sessionId} due to optimistic lock. Answer processing failed. P:${participantId}, Q:${answeredQuestionId}`,
             );
-            throw error;
+            // Replaced emitErrorToParticipant with logging
+            this.logger.error(`[User Error] Failed to process answer for P:${participantId} due to a server conflict. (S:${sessionId}, Q:${answeredQuestionId})`);
+            return;
           }
         } else {
-          let errorMessage = 'Unknown error';
-          let errorStack = undefined;
-          if (error instanceof Error) {
-            errorMessage = error.message;
-            errorStack = error.stack;
-          }
+          const errorMessage = error instanceof Error ? error.message : String(error);
           this.logger.error(
-            `Unhandled error in processParticipantAnswer for S:${sessionId}, P:${participantId}: ${errorMessage}`,
-            errorStack,
+            `Unexpected error processing answer for S:${sessionId}, P:${participantId}, Q:${answeredQuestionId} (Attempt ${retries + 1}): ${errorMessage}`,
+            error instanceof Error ? error.stack : undefined
           );
-          throw error;
+          // Replaced emitErrorToParticipant with logging
+          this.logger.error(`[User Error] An unexpected error occurred while processing answer for P:${participantId}. (S:${sessionId}, Q:${answeredQuestionId})`);
+          return; 
         }
       }
+    }
+  }
+
+  async getNextQuestionForParticipant(sessionId: string, participantId: string): Promise<Question | null> {
+    this.logger.log(`Orchestrator: Getting next question for P:${participantId} in S:${sessionId}`);
+    const session = await this.getSession(sessionId);
+    if (!session) {
+      this.logger.error(`S:${sessionId} not found. Cannot get next question.`);
+      return null;
+    }
+
+    const participant = session.participants.find(p => p.id === participantId);
+    if (!participant) {
+      this.logger.error(`P:${participantId} not found in S:${sessionId}. Cannot get next question.`);
+      return null;
+    }
+    
+    if (participant.status === 'COMPLETED') {
+      this.logger.log(`P:${participantId} is already COMPLETED. No next question.`);
+      this.sessionEventsService.emitParticipantStatus(sessionId, participantId, 'COMPLETED');
+      return null;
+    }
+
+    let participantQueue = await this.getParticipantQueue(sessionId, participantId);
+    if (!participantQueue || participantQueue.questions.length === 0 || participantQueue.currentQuestionIndex >= participantQueue.questions.length) {
+      this.logger.log(`No existing or valid queue for P:${participantId}. Initializing/Re-initializing...`);
+      participantQueue = await this.initializeParticipantQueue(session, participant);
+      if (!participantQueue) {
+        this.logger.error(`Failed to initialize queue for P:${participantId}. Cannot determine next question.`);
+        this.sessionEventsService.emitParticipantStatus(sessionId, participantId, participant.status); 
+        return null;
+      }
+    }
+    
+    const nextQuestion = participantQueue.questions[participantQueue.currentQuestionIndex];
+    
+    if (nextQuestion) {
+        this.logger.log(`Next question for P:${participantId} is Q:${nextQuestion.id} from queue index ${participantQueue.currentQuestionIndex}.`);
+        // Ensure participant.currentQuestion is updated before emitting, though processParticipantAnswer should handle primary state changes.
+        // participant.currentQuestion = nextQuestion.id; // This might be redundant if processParticipantAnswer is the sole mutator.
+        this.sessionEventsService.emitQuestionReady(sessionId, participantId, nextQuestion);
+        return nextQuestion;
+    } else {
+        this.logger.warn(`P:${participantId} in S:${sessionId}: No next question found in queue, but status is not COMPLETED. This might indicate end of queue.`);
+        if(participantQueue.currentQuestionIndex >= participantQueue.questions.length ){
+            participant.status = 'COMPLETED';
+            participant.currentQuestion = ''; // Clear current question
+            try {
+              session.version += 1;
+              // participant.version +=1; // Removed
+              await this.persistSession(session);
+              await this.setParticipantQueue(sessionId, participantId, participantQueue);
+              this.sessionEventsService.emitParticipantStatus(sessionId, participant.id, 'COMPLETED');
+              // No emitSessionStateToAll here directly
+              this.logger.log(`P:${participantId} marked COMPLETED in getNextQuestion as end of queue was reached.`);
+            } catch (error) {
+              this.logger.error(`Error persisting COMPLETED status for P:${participantId} in getNextQuestion: ${error}`);
+            }
+        }
+        return null;
     }
   }
 

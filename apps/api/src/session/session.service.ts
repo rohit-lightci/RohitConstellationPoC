@@ -14,6 +14,7 @@ import {
 import { Repository } from 'typeorm';
 import { v4 as uuidv4 } from 'uuid';
 
+import { CreateAnswerDto } from '../answer/answer.dto';
 import { Answer } from '../answer/answer.entity';
 import { AnswerService } from '../answer/answer.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
@@ -120,7 +121,9 @@ export class SessionService {
   }
 
   async findOne(id: string, loadRelations = false): Promise<TypesSession | null> {
-    const findOptions = loadRelations ? { where: { id }, relations: ['answers'] } : { where: { id } };
+    const findOptions = loadRelations 
+      ? { where: { id }, relations: ['answers'] }
+      : { where: { id } };
     const sessionEntity = await this.sessionRepository.findOne(findOptions);
     if (!sessionEntity) return null;
     return this.mapEntityToType(sessionEntity);
@@ -264,46 +267,52 @@ export class SessionService {
     return this.save(session);
   }
 
+  private async getSessionForModification(sessionId: string): Promise<Session | null> {
+    return this.sessionRepository.findOne({ 
+      where: { id: sessionId } 
+    });
+  }
+
   async submitAnswer(
     sessionId: string,
     participantId: string,
     questionId: string,
     responseValue: string | number,
   ): Promise<Answer> {
-    
-    const sessionValidation = await this.findOne(sessionId);
-    if (!sessionValidation) {
-        this.logger.error(`SubmitAnswer: Session ${sessionId} not found for P ${participantId} Q ${questionId}`);
-        throw new NotFoundException('Session not found.');
-    }
-    const participantValidation = sessionValidation.participants.find(p => p.id === participantId);
-    if (!participantValidation) {
-        this.logger.error(`SubmitAnswer: Participant ${participantId} not found in S ${sessionId} for Q ${questionId}`);
-        throw new NotFoundException('Participant not found in this session.');
-    }
-    if (participantValidation.status === 'COMPLETED') {
-        this.logger.warn(`SubmitAnswer: P ${participantId} in S ${sessionId} already COMPLETED. Q ${questionId}`);
-        throw new Error('Participant has already completed the session.');
-    }
-    if (participantValidation.currentQuestion !== questionId) {
-        this.logger.warn(`SubmitAnswer: P ${participantId} in S ${sessionId} answering Q ${questionId}, but current is ${participantValidation.currentQuestion}`);
-    }
+    const session = await this.getSessionForModification(sessionId);
+    if (!session) throw new NotFoundException('Session not found');
 
-    const answer = await this.answerService.create({
+    const participant = session.participants.find(p => p.id === participantId);
+    if (!participant) throw new NotFoundException('Participant not found');
+
+    const question = session.sections
+      .flatMap(s => s.questions || [])
+      .find(q => q.id === questionId);
+    if (!question) throw new NotFoundException('Question not found in session');
+
+    const responseText = typeof responseValue === 'string' ? responseValue : String(responseValue);
+
+    const answerData: CreateAnswerDto = {
       sessionId,
       participantId,
       questionId,
-      response: responseValue,
+      response: responseText,
+    };
+
+    const savedAnswer = await this.answerService.create(answerData);
+    
+    this.logger.log(`Answer ${savedAnswer.id} submitted by P:${participantId} for Q:${questionId}. Orchestrating next step.`);
+
+    this.orchestratorService.processParticipantAnswer(
+        sessionId,
+        participantId,
+        questionId,
+        responseValue,
+        savedAnswer.id
+    ).catch(err => {
+        this.logger.error(`Error in background orchestrator process for S:${sessionId}, P:${participantId}, A:${savedAnswer.id}: ${err.message}`, err.stack);
     });
 
-    this.orchestratorService.processParticipantAnswer(sessionId, participantId, questionId, responseValue)
-        .catch(error => {
-            this.logger.error(
-                `Critical error in OrchestratorService.processParticipantAnswer for S:${sessionId}, P:${participantId}, Q:${questionId}. Error: ${error.message}`,
-                error.stack
-            );
-        });
-
-    return answer;
+    return savedAnswer;
   }
 }

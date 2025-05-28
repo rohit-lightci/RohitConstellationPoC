@@ -30,4 +30,10 @@ export class Answer implements Omit<QuestionResponse, 'sessionId' | 'evaluation'
   // For direct access, if needed:
   @Column()
   sessionId: string;
+
+  @Column({ 
+    type: 'text', // Using 'text' for potentially long string representations of vectors
+    nullable: true 
+  })
+  embedding: string; // Type is string
 } 
