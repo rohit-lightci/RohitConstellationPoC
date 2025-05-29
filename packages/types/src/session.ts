@@ -1,7 +1,7 @@
 export type SessionType = 'RETRO';
 export type SessionStatus = 'DRAFT' | 'ACTIVE' | 'COMPLETED';
 export type ParticipantStatus = 'ACTIVE' | 'INACTIVE' | 'COMPLETED';
-export type SectionType = 'MAD' | 'SAD' | 'GLAD';
+export type SectionType = 'MAD' | 'SAD' | 'GLAD' | 'CUSTOM';
 export type SectionStatus = 'PENDING' | 'ACTIVE' | 'COMPLETED';
 export type QuestionType = 'TEXT' | 'RATING' | 'MULTIPLE_CHOICE' | 'AGREE_DISAGREE';
 export type QuestionIntent = 'BASE' | 'FOLLOW_UP' | 'CROSS_POLLINATION';
@@ -43,6 +43,7 @@ export interface Participant {
 
 export interface Section {
   id: string;
+  name: string;
   type: SectionType;
   order: number;
   timeLimit: number;  // 10 minutes

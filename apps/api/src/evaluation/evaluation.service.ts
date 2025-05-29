@@ -6,7 +6,8 @@ import { LLMService } from '../llm/llm.service'; // Import LLMService
 
 interface LLMEvaluationResponse {
   isSufficient: boolean;
-  feedback: string;
+  participantFeedback: string; // Renamed from 'feedback'
+  analyticalFeedback?: string; // New optional field for detailed analysis
   // score?: number; // Optional: if you want the LLM to provide a score
 }
 
@@ -25,18 +26,29 @@ export class EvaluationService {
     response: string | number,
     originalQuestionTextContext?: string, // Text of the ultimate base question if current is a follow-up
     sectionGoalContext?: string // Goal of the current section
-  ): Promise<{ isSufficient: boolean; feedback?: string; score?: number }> {
+  ): Promise<{ isSufficient: boolean; participantFeedback: string; analyticalFeedback?: string; score?: number }> {
     this.logger.log(
       `Evaluating P-Role:${participantAssignedRole}'s answer to Q:${question.id} (Intent: ${question.intent}) in Session:"${sessionTitle}" (Response: ${response}) using LLM.`, 
     );
 
-    const systemPrompt = `You are an AI assistant evaluating the sufficiency of a participant's answer to a question within a collaborative session.
-    The overall goal of this session (titled '${sessionTitle}') is: ${sessionDescription || 'Not specified'}.
-    The participant submitting this answer has the role of '${participantAssignedRole}'.
-    Your goal it determine the qualitaive OR quantitative measure of the answer and understand WHY and core of the problem to get more insights.
-Your response MUST be a JSON object with the following structure: {"isSufficient": boolean, "feedback": "string"}. 
-- 'isSufficient' should be true if the answer adequately addresses the question(s) and its goals, and false otherwise.
-- 'feedback' should be a concise message for the participant, explaining why the answer was deemed sufficient or insufficient, or suggesting areas for improvement if applicable.`;
+    const systemPrompt = `You are an expert AI assistant tasked with critically evaluating a participant's answer in a collaborative session.
+    Session Title: '${sessionTitle}'
+    Session Goal: ${sessionDescription || 'Not specified'}
+    Participant Role: '${participantAssignedRole}'
+
+    Your primary goal is to determine if the answer is 'sufficient'.
+    An answer is sufficient if it is clear, addresses the question's core intent and any stated goals, provides adequate detail, and demonstrates understanding.
+
+    If the answer is INSUFFICIENT, your feedback is crucial for generating a targeted follow-up question.
+    Your response MUST be a JSON object.
+
+    If an answer IS SUFFICIENT, the JSON should be:
+    {"isSufficient": true, "participantFeedback": "concise positive feedback for the participant"}
+
+    If an answer IS NOT SUFFICIENT, the JSON must be:
+    {"isSufficient": false, "participantFeedback": "concise, constructive feedback for the participant suggesting improvement", "analyticalFeedback": "detailed analysis of *why* the answer is insufficient. Pinpoint specific gaps, missing information, areas lacking depth, or unaddressed parts of the question/goals. This analysis will be used to formulate a follow-up question."}
+
+    Focus on identifying the *core reasons* for insufficiency in the 'analyticalFeedback'.`;
 
     let userMessageContent = `Please evaluate the following answer based on the provided context.\n\n`;
 
@@ -53,7 +65,7 @@ Your response MUST be a JSON object with the following structure: {"isSufficient
     if (sectionGoalContext) {
       userMessageContent += `Goal of the Current Section: "${sectionGoalContext}"\n`;
     }
-    userMessageContent += `\nParticipant's Answer: "${response}"\n\nIs this answer sufficient given the question(s) and goals? Provide feedback. Remember to respond only with the specified JSON object.`;
+    userMessageContent += `\nParticipant's Answer: "${response}"\n\nBased on the instructions, evaluate if this answer is sufficient and provide the required feedback in the specified JSON format.`;
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
       { role: 'system', content: systemPrompt },
@@ -67,32 +79,37 @@ Your response MUST be a JSON object with the following structure: {"isSufficient
 
       if (!llmResponseString) {
         this.logger.error('LLM returned no response string for evaluation.');
-        return { 
-          isSufficient: false, 
-          feedback: 'Automated evaluation could not be performed at this time. Please ensure your answer is comprehensive.'
+        return {
+          isSufficient: false,
+          participantFeedback: 'Automated evaluation could not be performed at this time. Please ensure your answer is comprehensive.'
         };
       }
 
       this.logger.debug(`LLM Raw Response for evaluation: ${llmResponseString}`);
       const parsedResponse: LLMEvaluationResponse = JSON.parse(llmResponseString);
 
-      if (typeof parsedResponse.isSufficient !== 'boolean' || typeof parsedResponse.feedback !== 'string') {
-        this.logger.error('LLM response for evaluation is not in the expected JSON format.', parsedResponse);
-        return { 
-          isSufficient: false, 
-          feedback: 'Automated evaluation result was unclear. Please ensure your answer is comprehensive.'
-        };    
+      if (typeof parsedResponse.isSufficient !== 'boolean' || typeof parsedResponse.participantFeedback !== 'string') {
+        this.logger.error('LLM response for evaluation is not in the expected JSON format (missing isSufficient or participantFeedback).', parsedResponse);
+        return {
+          isSufficient: false,
+          participantFeedback: 'Automated evaluation result was unclear. Please ensure your answer is comprehensive.'
+        };
       }
       
-      this.logger.log(`LLM Evaluation for Q:${question.id} - Sufficient: ${parsedResponse.isSufficient}, Feedback: ${parsedResponse.feedback}`);
-      return parsedResponse;
+      this.logger.log(`LLM Evaluation for Q:${question.id} - Sufficient: ${parsedResponse.isSufficient}, ParticipantFeedback: ${parsedResponse.participantFeedback}, AnalyticalFeedback: ${parsedResponse.analyticalFeedback || 'N/A'}`);
+      return {
+        isSufficient: parsedResponse.isSufficient,
+        participantFeedback: parsedResponse.participantFeedback,
+        analyticalFeedback: parsedResponse.analyticalFeedback,
+        // score: parsedResponse.score // if you re-introduce score
+      };
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error during LLM evaluation';
       this.logger.error(`Error during LLM evaluation for Q:${question.id}: ${errorMessage}`, error instanceof Error ? error.stack : undefined);
-      return { 
-        isSufficient: false, 
-        feedback: 'An error occurred during automated evaluation. Please ensure your answer is thorough.'
+      return {
+        isSufficient: false,
+        participantFeedback: 'An error occurred during automated evaluation. Please ensure your answer is thorough.'
       };
     }
   }

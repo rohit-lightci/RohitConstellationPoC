@@ -5,6 +5,7 @@ import { Answer } from '../answer/answer.entity';
 import { AnswerModule } from '../answer/answer.module';
 import { HighlightModule } from '../highlight/highlight.module';
 import { OrchestratorModule } from '../orchestrator/orchestrator.module';
+import { PromptContentGenerationModule } from '../prompt-content-generation/prompt-content-generation.module';
 
 import { SessionEventsService } from './session-events.service';
 import { SessionController } from './session.controller';
@@ -18,6 +19,7 @@ import { SessionService } from './session.service';
     AnswerModule,
     HighlightModule,
     forwardRef(() => OrchestratorModule),
+    PromptContentGenerationModule,
   ],
   controllers: [SessionController],
   providers: [SessionService, SessionGateway, SessionEventsService],

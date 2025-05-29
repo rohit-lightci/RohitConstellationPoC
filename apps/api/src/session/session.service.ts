@@ -6,7 +6,6 @@ import {
   SectionStatus,
   Question,
   QuestionIntent,
-  CreateSessionDto as TypesCreateSessionDto,
   Session as TypesSession,
   Participant as TypesParticipant,
   Section as TypesSection,
@@ -19,8 +18,10 @@ import { Answer } from '../answer/answer.entity';
 import { AnswerService } from '../answer/answer.service';
 import { HighlightService } from '../highlight/highlight.service';
 import { OrchestratorService } from '../orchestrator/orchestrator.service';
+import { PromptContentGenerationService } from '../prompt-content-generation/prompt-content-generation.service';
 
 import { SessionEventsService } from './session-events.service';
+import { CreateSessionDto } from './session.dto';
 import { Session } from './session.entity';
 
 @Injectable()
@@ -37,6 +38,7 @@ export class SessionService {
     private readonly orchestratorService: OrchestratorService,
     @InjectRepository(Answer)
     private readonly answerRepository: Repository<Answer>,
+    private readonly promptContentGenerationService: PromptContentGenerationService,
   ) {}
 
   private mapEntityToType(sessionEntity: Session): TypesSession {
@@ -105,10 +107,12 @@ export class SessionService {
     return sections;
   }
 
-  async createSession(dto: TypesCreateSessionDto): Promise<TypesSession> {
+  async createSession(dto: CreateSessionDto): Promise<TypesSession> {
+    this.logger.log(`Creating session with title: ${dto.title}, template: ${dto.template}, customPrompt: ${!!dto.customPrompt}`);
+    
     const sessionEntity = new Session();
     sessionEntity.title = dto.title;
-    sessionEntity.template = dto.template;
+    sessionEntity.template = dto.template; 
     sessionEntity.description = dto.description;
     sessionEntity.type = dto.type;
     sessionEntity.globalTimeLimit = dto.globalTimeLimit;
@@ -119,9 +123,34 @@ export class SessionService {
     sessionEntity.permissions = dto.permissions;
     sessionEntity.status = 'DRAFT';
     sessionEntity.participants = [];
-    sessionEntity.sections = this.createRetroSections();
+
+    if (dto.customPrompt) {
+      this.logger.log(`Custom prompt provided: "${dto.customPrompt}". Generating content...`);
+      try {
+        const { sections } = await this.promptContentGenerationService.generateSessionContent(dto.customPrompt);
+        sessionEntity.sections = sections;
+        // Potentially update sessionEntity.template or type based on generated content if needed
+        // For example, if a prompt is used, template might become irrelevant or set to 'CUSTOM_PROMPT_BASED'
+        sessionEntity.template = 'PROMPT_GENERATED'; // Indicate that this session was generated from a prompt
+      } catch (error) {
+        if (error instanceof Error) {
+          this.logger.error(`Error generating session content from prompt: ${error.message}`, error.stack);
+        } else {
+          this.logger.error(`Error generating session content from prompt: ${String(error)}`);
+        }
+        this.logger.warn('Falling back to default retro sections due to error in prompt generation.');
+        sessionEntity.sections = this.createRetroSections(); 
+      }
+    } else if (dto.template) {
+      this.logger.log(`Using template: "${dto.template}" to create sections.`);
+      sessionEntity.sections = this.createRetroSections(); // Assuming createRetroSections uses dto.template or is generic
+    } else {
+      this.logger.warn('Neither custom prompt nor template provided. Creating session with empty sections.');
+      sessionEntity.sections = [];
+    }
     
     const savedEntity = await this.sessionRepository.save(sessionEntity);
+    this.logger.log(`Session created with ID: ${savedEntity.id}`);
     return this.mapEntityToType(savedEntity);
   }
 

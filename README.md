@@ -241,14 +241,18 @@ This document outlines the event flow and service responsibilities within the re
             *   Adds the client's socket to the `session:<sessionId>` room.
             *   Adds the client's socket to a participant-specific room: `participant:<participantId>`.
             *   Stores a mapping of `socket.id` to `participantId` for disconnect handling.
+            *   Emits `SESSION_EVENT.PARTICIPANT_JOINED` to the joining client with their `participantId`.
             *   Emits `SESSION_EVENT.STATE` (e.g., `session:state`) with the updated session data (including the new participant list) to *all* clients in the `session:<sessionId>` room.
-            *   If the session is already `ACTIVE`: Calls `OrchestratorService.getNextQuestionForParticipant(sessionId, newParticipantId)`.
+            *   If the session is already `ACTIVE`: Calls `OrchestratorService.getNextQuestionForParticipant(sessionId, newParticipantId)` (to prepare the participant's state).
 
 3.  **Participant UI Receives Session State & First Question:**
-    *   **`JoinSession.tsx` or `ActiveSession.tsx` listens for `SESSION_EVENT.STATE`:** Updates its local state with the session details (status, participant list).
-    *   **`ActiveSession.tsx` listens for `SESSION_EVENT.QUESTION_READY` (e.g., `question:ready`):**
-        *   This event is triggered by `OrchestratorService.getNextQuestionForParticipant()` via `SessionEventsService.emitQuestionReady()`.
-        *   Payload includes the `Question` object.
+    *   **`JoinSession.tsx` or `ActiveSession.tsx` listens for `SESSION_EVENT.STATE`:** Updates its local state with the session details (status, participant list). Navigates to `ActiveSession.tsx` if session is active and participant ID is known.
+    *   **`ActiveSession.tsx` (upon mount, if `sessionId` and `participantId` are available):**
+        *   Emits `SESSION_EVENT.GET_QUESTION` to the backend.
+    *   **`SessionGateway.handleGetQuestion(client, payload)`:**
+        *   Retrieves the participant's current question (e.g., from `Participant.currentQuestionId` which was set by `OrchestratorService` or defaults).
+        *   Emits `SESSION_EVENT.QUESTION_READY` (e.g., `question:ready`) back to the specific requesting client. Payload includes the `Question` object.
+    *   **`ActiveSession.tsx` listens for `SESSION_EVENT.QUESTION_READY`:**
         *   The UI displays the received question.
 
 **III. Participant: Answering a Question**
@@ -256,35 +260,40 @@ This document outlines the event flow and service responsibilities within the re
 1.  **Participant UI Interaction (`ActiveSession.tsx`):**
     *   Participant types their answer or selects an option.
     *   Clicks "Submit".
-    *   Frontend calls `websocketService.submitAnswer(sessionId, participantId, questionId, responseValue)`.
+    *   Frontend calls `websocketService.submitAnswer(sessionId, participantId, questionId, responseValue)`. (The `participantId` is sent from the client).
 
 2.  **Answer Submission (WebSocket):**
-    *   Frontend emits `SESSION_EVENT.QUESTION_ANSWER` (e.g., `session:question:answer`) with the answer details.
-    *   **`SessionGateway.handleAnswerSubmission(client, payload)`:**
-        *   Receives the event.
+    *   Frontend emits `SESSION_EVENT.QUESTION_ANSWER` (e.g., `session:question:answer`) with the answer details, including `participantId`.
+    *   **`SessionGateway.handleQuestionAnswer(client, payload)`:**
+        *   Receives the event. Uses `participantId` from payload and `sessionId` from handshake/query.
         *   Calls `SessionService.submitAnswer(sessionId, participantId, questionId, responseValue)`.
+        *   Returns an acknowledgment (e.g., `{ status: 'received', answerId: savedAnswer.id }`) to the calling client.
+        *   Logic for determining and emitting the next question or participant completion events has been decoupled from this handler for now.
 
 3.  **Answer Processing & Embedding (`SessionService.submitAnswer` & `AnswerService`):**
     *   **`SessionService.submitAnswer()`:**
-        *   Logs the submission.
+        *   Validates the session, participant, and that the `questionId` being answered is the participant's current question.
         *   Calls `AnswerService.create(answerData)` where `answerData` includes `sessionId`, `participantId`, `questionId`, and `response`.
-        *   **`AnswerService.create(answerData)`:**
-            *   Creates an `Answer` entity.
-            *   Saves it to the database (this is the initial save, embedding is next).
-            *   **Asynchronously (but `await`ed if Option 1 from our previous discussion is implemented):** Calls `this.generateAndStoreEmbedding(savedAnswer.id, responseText)`.
-            *   **`AnswerService.generateAndStoreEmbedding(answerId, textToEmbed)`:**
-                *   Calls `EmbeddingService.generateEmbedding(textToEmbed)`.
-                *   **`EmbeddingService.generateEmbedding(text)`:**
-                    *   Initializes OpenAI client (using API key from `ConfigService`).
-                    *   Calls OpenAI API (e.g., `text-embedding-ada-002`) to get the vector embedding.
-                    *   Converts the numeric array embedding to its SQL string representation using `pgvector.toSql()`.
-                    *   Returns the string embedding.
-                *   `AnswerService` takes the string embedding and updates the corresponding `Answer` entity in the database, saving the embedding string to the `embedding` column.
-            *   `AnswerService.create()` returns the `Answer` (potentially with the embedding, if awaited and successful).
-        *   `SessionService.submitAnswer()` receives the `savedAnswer` (with its ID).
-        *   **Crucially, it then calls `OrchestratorService.processParticipantAnswer(sessionId, participantId, answeredQuestionId, response, savedAnswer.id)`.**
+        *   The primary responsibility of this method is now to validate the submission and persist the answer using `AnswerService`.
+        *   It returns the saved `Answer` entity (e.g., `Promise<Answer>`).
+        *   It **does not** call `OrchestratorService.processParticipantAnswer()` directly.
+    *   **`AnswerService.create(answerData)`:**
+        *   Creates an `Answer` entity (using TypeORM, relating it to the `Session` via `sessionId`).
+        *   Saves it to the database (this is an atomic `INSERT` operation).
+        *   **Asynchronously (e.g., `await`ed or as a background task):** Calls `this.generateAndStoreEmbedding(savedAnswer.id, responseText)`.
+        *   **`AnswerService.generateAndStoreEmbedding(answerId, textToEmbed)`:**
+            *   Calls `EmbeddingService.generateEmbedding(textToEmbed)`.
+            *   **`EmbeddingService.generateEmbedding(text)`:**
+                *   Initializes OpenAI client (using API key from `ConfigService`).
+                *   Calls OpenAI API (e.g., `text-embedding-ada-002`) to get the vector embedding.
+                *   Converts the numeric array embedding to its SQL string representation using `pgvector.toSql()`.
+                *   Returns the string embedding.
+            *   `AnswerService` takes the string embedding and updates the corresponding `Answer` entity in the database, saving the embedding string to the `embedding` column.
+        *   `AnswerService.create()` returns the `Answer` (potentially with the embedding, if awaited and successful).
 
 **IV. Orchestration: Evaluation, Follow-ups, Next Question & Similarity Search**
+
+*The following section describes the planned workflow for processing a submitted answer and determining the next steps for a participant. Currently, the invocation of `OrchestratorService.processParticipantAnswer()` immediately following an answer submission is deferred. The system first ensures the answer is saved (as described in Section III), and the logic for triggering this orchestration flow will be integrated subsequently.*
 
 1.  **`OrchestratorService.processParticipantAnswer(..., answerId)`:**
     *   This is the brain of the question flow. It's a complex method, often involving a retry loop for optimistic locking.

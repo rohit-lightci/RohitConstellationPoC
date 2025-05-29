@@ -236,11 +236,11 @@ export const ActiveSession: React.FC = () => {
         <div className="flex justify-between items-start mb-6">
           <div>
             <h1 className="text-2xl font-bold mb-2">{currentQuestion?.text || 'Loading question...'}</h1>
-            {sessionState && (
+            {/* {sessionState && (
                 <div className="text-sm text-gray-500">
                 {sessionState.participants.length} participants • {answers.length} answers
                 </div>
-            )}
+            )} */}
           </div>
           {isHost && (
             <button
@@ -286,11 +286,11 @@ export const ActiveSession: React.FC = () => {
               <p className="text-gray-800 whitespace-pre-wrap">{answer.content}</p>
             </div>
           ))}
-          {answers.length === 0 && currentQuestion && !isLoadingNextQuestion && (
+          {/* {answers.length === 0 && currentQuestion && !isLoadingNextQuestion && (
             <div className="text-center text-gray-500 py-8">
               No answers submitted for this question yet.
             </div>
-          )}
+          )} */}
         </div>
       </div>
 

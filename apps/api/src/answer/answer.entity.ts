@@ -32,7 +32,7 @@ export class Answer implements Omit<QuestionResponse, 'sessionId' | 'evaluation'
   sessionId: string;
 
   @Column({ 
-    type: 'text', // Using 'text' for potentially long string representations of vectors
+    type: 'text',
     nullable: true 
   })
   embedding: string; // Type is string

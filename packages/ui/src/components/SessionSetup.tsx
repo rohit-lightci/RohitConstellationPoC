@@ -18,18 +18,18 @@ const templateOptions = [
 ];
 
 export const SessionSetup: React.FC<{
-  onContinue?: (data: { template: string; title: string; duration: number }) => void;
+  onContinue?: (data: { template: string; title: string; duration: number; customPrompt?: string }) => void;
   data: SessionData;
   setData: React.Dispatch<React.SetStateAction<SessionData>>;
 }> = ({ onContinue, data, setData }) => {
   const [hasAttemptedContinue, setHasAttemptedContinue] = useState(false);
 
-  const canContinue = !!data.template && !!data.title?.trim();
+  const canContinue = !!data.title?.trim() && (!!data.template || !!data.customPrompt?.trim());
 
   const handleContinue = () => {
     setHasAttemptedContinue(true);
     if (canContinue) {
-      onContinue?.({ template: data.template!, title: data.title!, duration: data.duration || 60 });
+      onContinue?.({ template: data.template!, title: data.title!, duration: data.duration || 60, customPrompt: data.customPrompt });
     }
   };
 
@@ -134,6 +134,17 @@ export const SessionSetup: React.FC<{
                       />
                     </div>
                     <div>
+                      <label className="block text-sm font-medium mb-2">Custom Prompt (Optional)</label>
+                      <textarea
+                        className="w-full border rounded px-3 py-2"
+                        placeholder="Enter a prompt to generate session structure (e.g., sections, base questions)"
+                        value={data.customPrompt || ''}
+                        rows={3}
+                        onChange={e => setData((prev) => ({ ...prev, customPrompt: e.target.value }))}
+                      />
+                      <div className="text-xs text-gray-400 mt-1">If provided, this prompt will be used by an AI to generate the session structure. If left blank, the selected template will be used.</div>
+                    </div>
+                    <div>
                       <label className="block text-sm font-medium mb-2">Session Duration (minutes)</label>
                       <input
                         type="number"
@@ -170,7 +181,7 @@ export const SessionSetup: React.FC<{
           </div>
           {hasAttemptedContinue && !canContinue && (
             <div className="text-center text-red-500 text-sm mt-2">
-              Please select a template and enter a session title to continue
+              Please enter a session title and either select a template or provide a custom prompt to continue.
             </div>
           )}
         </div>

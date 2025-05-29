@@ -235,7 +235,7 @@ export class OrchestratorService {
     baseQuestionOrderForFollowUp: number,
     originalBaseQuestionTextForLLMPrompt: string,
     response: string | number, 
-    evaluationResultFeedback: string | undefined,
+    evaluationResultAnalyticalFeedback: string | undefined,
     participantQueue: ParticipantQueueCache,
     sessionTitle: string,
     sessionDescription: string | undefined,
@@ -244,40 +244,55 @@ export class OrchestratorService {
   ): Promise<{ nextQuestion: Question | null; newFollowUpQuestionForSessionPersistence: Question | null }> {
     this.logger.log(`Attempting to generate LLM follow-up for P:${participant.id} (Role: ${participantAssignedRole}), BaseQ:${baseQuestionIdForFollowUp} in Session: "${sessionTitle}", SimilarContexts: ${similarAnswersContext ? similarAnswersContext.length : 0} (Follow-up attempt ${ (participantQueue.followUpCounts[baseQuestionIdForFollowUp] || 0) + 1})`);
 
-    const llmSystemPrompt = `You are a helpful session facilitator. Your goal is to generate a concise follow-up question to elicit more specific or complete information from a participant after their previous answer was deemed insufficient.
+    const llmSystemPrompt = `You are an expert session facilitator and critical thinker. Your goal is to generate a *single, concise, and insightful* follow-up question when a participant's answer is insufficient.
+    Avoid generic requests like "Can you provide more examples?". Instead, aim to:
+    - Uncover *underlying reasons, motivations, or assumptions*.
+    - Explore the *impact, consequences, or significance* of their statement.
+    - Encourage *reflection on alternatives or different perspectives*.
+    - Identify *key learnings or deeper insights*.
+    - If the answer is vague, ask for *clarification on a specific part* of their statement rather than general elaboration.
+
+    The question should be direct, easy to understand, and tailored to the context provided.
     The overall goal of this session (titled '${sessionTitle}') is: ${sessionDescription || 'Not specified'}.
-    The participant (Role: '${participantAssignedRole}') needs further prompting.
-    The question should be direct and easy to understand.`;
-    
-    let llmUserPrompt = `The participant just answered a question, but their answer was not sufficient. Please generate a follow-up question for them.\n\n`;
+    The participant (Role: '${participantAssignedRole}') needs further prompting.`;
+
+    let llmUserPrompt = `The participant just answered a question, but their answer was deemed insufficient.\n`;
+
     if (answeredQuestionObject.intent === 'FOLLOW_UP') {
         llmUserPrompt += `Context: The participant is responding to a series of questions. The original question in this series was: "${originalBaseQuestionTextForLLMPrompt}"\n`;
         llmUserPrompt += `The previous follow-up question asked was: "${answeredQuestionObject.text}"\n`;
     } else {
         llmUserPrompt += `The question asked was: "${originalBaseQuestionTextForLLMPrompt}"\n`;
     }
-    llmUserPrompt += `Participant's Insufficient Answer: "${response}"\n`;
-    llmUserPrompt += `Reason the answer was insufficient (feedback from evaluation): "${evaluationResultFeedback}"\n`;
-    
+
+    llmUserPrompt += `Participant's Insufficient Answer: "${typeof response === 'string' ? response : JSON.stringify(response)}"\n`;
+    llmUserPrompt += `Reason for Insufficiency (Feedback from evaluation): "${evaluationResultAnalyticalFeedback || 'No specific feedback provided, but the answer needs more depth.'}"\n\n`;
+
+    llmUserPrompt += `Consider the following approaches for your follow-up question:\n`;
+    llmUserPrompt += `1.  **Clarification:** If a specific part of the answer is ambiguous, ask for clarification on *that part*. (e.g., "When you mentioned 'X', what did you specifically mean by that?")\n`;
+    llmUserPrompt += `2.  **Probing for Reasons/Motivations:** Ask *why* they hold that view or made that statement. (e.g., "What led you to that conclusion about 'Y'?")\n`;
+    llmUserPrompt += `3.  **Exploring Impact/Consequences:** Ask about the effects or results of what they described. (e.g., "What was the primary impact of 'Z' on the outcome?")\n`;
+    llmUserPrompt += `4.  **Seeking Elaboration on Depth/Insight:** If the answer is superficial, ask for a deeper dive into a key aspect. (e.g., "Could you elaborate on the most critical factor in 'A'?")\n`;
+    llmUserPrompt += `5.  **Considering Alternatives/Trade-offs:** If appropriate, ask about other options or why the stated one was chosen. (e.g., "Were other approaches like 'B' considered, and if so, why was this one preferred?")\n\n`;
+
     if (similarAnswersContext && similarAnswersContext.length > 0) {
-      llmUserPrompt += `\nFor additional context, here are some relevant past answers from other participants on similar topics (higher score means more similar):\n`;
+      llmUserPrompt += `For additional context, here are some relevant past answers from other participants on similar topics (higher score means more similar):\n`;
       for (const ctx of similarAnswersContext) {
         const questionPreview = ctx.questionText.length > 50 ? `${ctx.questionText.substring(0, 47)}...` : ctx.questionText;
         const answerPreview = String(ctx.responseText).length > 70 ? `${String(ctx.responseText).substring(0, 67)}...` : String(ctx.responseText);
         llmUserPrompt += `- Regarding a question like "${questionPreview}", a participant (Role: ${ctx.participantRole}) answered: "${answerPreview}" (Similarity: ${ctx.similarityScore})\n`;
       }
-      llmUserPrompt += '\nPlease consider this context when formulating your follow-up question to potentially highlight gaps, common themes, or ask for differentiation from these other answers.\n';
+      llmUserPrompt += 'Please consider this context when formulating your follow-up question to potentially highlight gaps, common themes, or ask for differentiation from these other answers.\n';
     }
 
-    llmUserPrompt += `\nBased on all the above, please generate a single, brief, targeted follow-up question to help the participant provide the missing information or elaborate appropriately. Do not be conversational, just provide the question text.`;
+    llmUserPrompt += `\nBased on all the above, generate a *single, concise, and insightful* follow-up question for the participant. Focus on ONE key area for improvement. Do not be conversational. Just provide the question text.`;
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         { role: 'system', content: llmSystemPrompt },
         { role: 'user', content: llmUserPrompt },
     ];
 
-    // Added console.log for debugging LLM messages
-    console.log('Follow-up Generation LLM Messages >>>>>>>>>>>>>>', JSON.stringify(messages, null, 2));
+    this.logger.debug(`Follow-up Generation LLM Messages >>>>>>>>>>>>>>\nSystem Prompt:\n${llmSystemPrompt}\n\nUser Prompt:\n${llmUserPrompt}`);
 
     let llmGeneratedFollowUpText = '';
     try {
@@ -289,7 +304,7 @@ export class OrchestratorService {
 
     if (!llmGeneratedFollowUpText) {
         this.logger.warn('LLM failed to generate follow-up question text or returned empty. Falling back to generic prompt.');
-        const fallbackDetail = evaluationResultFeedback ? `Specifically, consider: ${evaluationResultFeedback}` : 'Please provide more detail.';
+        const fallbackDetail = evaluationResultAnalyticalFeedback ? `Specifically, consider: ${evaluationResultAnalyticalFeedback}` : 'Please provide more detail.';
         llmGeneratedFollowUpText = `Please elaborate further on your previous answer regarding "${answeredQuestionObject.text.substring(0,50)}...". ${fallbackDetail}`;
     }
     
@@ -357,11 +372,11 @@ export class OrchestratorService {
     participant: Participant,
     answeredQuestionObject: Question,
     response: string | number, 
-    evaluationResult: { feedback?: string },
+    evaluationResult: { isSufficient: boolean; participantFeedback?: string; analyticalFeedback?: string; score?: number },
     participantQueue: ParticipantQueueCache,
     similarAnswersContext: FormattedSimilarAnswerContext[] | null
   ): Promise<{ nextQuestion: Question | null; participantCompletedSession: boolean; newFollowUpQuestionForSessionPersistence: Question | null }> {
-    this.logger.log(`Answer to Q:${answeredQuestionObject.id} by P:${participant.id} was insufficient. Feedback: "${evaluationResult.feedback}". Handling follow-up. Similar contexts: ${similarAnswersContext ? similarAnswersContext.length : 0}`);
+    this.logger.log(`Answer to Q:${answeredQuestionObject.id} by P:${participant.id} was insufficient. AnalyticalFeedback: "${evaluationResult.analyticalFeedback || evaluationResult.participantFeedback || 'N/A'}". Handling follow-up. Similar contexts: ${similarAnswersContext ? similarAnswersContext.length : 0}`);
     
     let baseQuestionIdForFollowUp: string;
     let baseQuestionOrderForFollowUp: number;
@@ -397,7 +412,7 @@ export class OrchestratorService {
         baseQuestionOrderForFollowUp, 
         originalBaseQuestionTextForLLMPrompt!, 
         response, 
-        evaluationResult.feedback,
+        evaluationResult.analyticalFeedback,
         participantQueue,
         session.title,
         session.description,
@@ -546,8 +561,7 @@ export class OrchestratorService {
     );
 
     if (participantCompletedSession) {
-      this.logger.log(`P:${participant.id} COMPLETED. Checking if all participants in S:${session.id} are complete.`);
-      // Check if all participants who were 'ACTIVE' or 'PENDING' are now 'COMPLETED'
+      this.logger.log(`P:${participant.id} COMPLETED. Checking if all participants in S:${session.id} are complete.`);      // Check if all participants who were 'ACTIVE' or 'PENDING' are now 'COMPLETED'
       const activeOrPendingParticipants = session.participants.filter(
         p => p.status !== 'COMPLETED' && p.status !== 'INACTIVE' // INACTIVE means they left or never joined properly
       );
@@ -833,3 +847,4 @@ export class OrchestratorService {
     return undefined;
   }
 }
+

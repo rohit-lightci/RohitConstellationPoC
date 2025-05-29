@@ -8,6 +8,10 @@ export class CreateSessionDto {
   @IsString()
   title: string;
 
+  @IsOptional()
+  @IsString()
+  customPrompt?: string;
+
   @IsString()
   type: SessionType = 'RETRO';  // For now, only RETRO is supported
 

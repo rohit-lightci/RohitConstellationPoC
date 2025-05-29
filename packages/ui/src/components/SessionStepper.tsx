@@ -16,6 +16,7 @@ export interface SessionData {
   title: string;
   description?: string;
   duration: number;
+  customPrompt?: string;
   anonymous?: boolean;
   participationRule?: string;
   permissions?: {
@@ -32,6 +33,7 @@ export const SessionStepper: React.FC = () => {
   const [sessionData, setSessionData] = useState<SessionData>({
     title: '',
     duration: 0,
+    customPrompt: '',
     anonymous: true,
     permissions: {
       askQuestions: true,
@@ -46,7 +48,11 @@ export const SessionStepper: React.FC = () => {
   useEffect(() => {
     if (sessionId) {
       websocketService.connect(sessionId);
-      websocketService.joinSession('Admin', 'HOST'); // send an join event and store the participant id in local storage
+      websocketService.joinSession('Admin', 'HOST', (adminParticipantId) => {
+        console.log('Admin joined with participant ID:', adminParticipantId);
+        // If SessionStepper needs to store/use adminParticipantId, it can be done here.
+        // For now, just logging, as participantId is mainly handled by SessionContext.
+      });
 
       websocketService.onSessionStateUpdate((state) => {
         console.log('Session state updated received:', state);
@@ -65,9 +71,9 @@ export const SessionStepper: React.FC = () => {
   }, [sessionId]);
 
   // Handlers to update session data from each step
-  const handleSessionSetupContinue = async (data: { template: string; title: string; duration: number }) => {
+  const handleSessionSetupContinue = async (data: { template: string; title: string; duration: number; customPrompt?: string }) => {
     try {
-      setSessionData((prev) => ({ ...prev, template: data.template, title: data.title, duration: data.duration }));
+      setSessionData((prev) => ({ ...prev, template: data.template, title: data.title, duration: data.duration, customPrompt: data.customPrompt }));
       setStep(1);
     } catch (err) {
       setError('Failed to update session data. Please try again.');
@@ -89,6 +95,7 @@ export const SessionStepper: React.FC = () => {
           type: 'RETRO',
           globalTimeLimit: sessionData.duration,
           description: sessionData.description,
+          customPrompt: sessionData.customPrompt,
           isAnonymous: sessionData.anonymous,
           participationRule: sessionData.participationRule,
           permissions: sessionData.permissions,
