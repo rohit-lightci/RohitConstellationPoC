@@ -8,6 +8,9 @@ import { websocketService } from '../services/websocket';
 import { SessionState } from '@rohit-constellation/types';
 import { WaitingLobby } from './WaitingLobby';
 
+
+console.log('SessionStepper');
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/v1';
 
 

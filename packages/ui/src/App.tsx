@@ -13,7 +13,7 @@ export const App: React.FC = () => {
         <div className="min-h-screen bg-gray-100 p-8">
           <Routes>
             {/* <Route path="/" element={<SessionStepper />} /> */}
-            <Route path="/create" element={<SessionStepper />} />
+            <Route path="/" element={<SessionStepper />} />
             <Route path="/join/:sessionId" element={<JoinSession />} />
             <Route path="/session/:sessionId/active" element={<ActiveSession />} />
             <Route path="/session/:sessionId/results" element={<SessionResultsPage />} />
