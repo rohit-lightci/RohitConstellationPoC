@@ -10,6 +10,6 @@
         "sslCertArn": "arn:aws:acm:us-east-1:597610889212:certificate/47beb03a-f160-434e-a134-12a234a6dc44"
     },
     "database": {
-        "name": "rohit-constellation"
+        "name": "rohit_constellation"
     }
 }
