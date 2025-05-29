@@ -61,7 +61,7 @@ jobs:
         run: pnpm build
 
       - name: Deploy to Lambda
-        run: pnpm exec cdk deploy -c env=${{ github.event.inputs.environment || 'development' }} --require-approval never
+        run: pnpm exec cdk deploy -c config=${{ github.event.inputs.environment || 'development' }} --require-approval never
         working-directory: ./infrastructure
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
