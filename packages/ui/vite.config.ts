@@ -11,19 +11,19 @@ export default defineConfig({
     },
   },
   build: {
-    lib: {
-      entry: resolve(__dirname, 'src/index.ts'),
-      name: 'RohitConstellationUI',
-      fileName: 'rohit-constellation-ui',
-    },
-    rollupOptions: {
-      external: ['react', 'react-dom'],
-      output: {
-        globals: {
-          react: 'React',
-          'react-dom': 'ReactDOM',
-        },
-      },
-    },
+    // lib: {
+    //   entry: resolve(__dirname, 'src/index.ts'),
+    //   name: 'RohitConstellationUI',
+    //   fileName: 'rohit-constellation-ui',
+    // },
+    // rollupOptions: {
+    //   external: ['react', 'react-dom'],
+    //   output: {
+    //     globals: {
+    //       react: 'React',
+    //       'react-dom': 'ReactDOM',
+    //     },
+    //   },
+    // },
   },
 }) 
