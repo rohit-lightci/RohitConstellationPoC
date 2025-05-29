@@ -11,12 +11,15 @@
   "scripts": {
     "dev": "turbo run dev",
     "build": "turbo run build",
+    "dev:ui": "pnpm --filter @rohit-constellation/ui dev",
     "lint": "turbo run lint",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "test": "turbo run test",
     "prepare": "husky",
     "lint-staged": "lint-staged",
-    "cdk": "pnpm --filter infrastructure cdk"
+    "cdk": "pnpm --filter infrastructure cdk",
+    "db:up": "docker-compose up -d postgres",
+    "db:down": "docker-compose down"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [

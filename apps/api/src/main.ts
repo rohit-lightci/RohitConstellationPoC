@@ -18,6 +18,11 @@ async function bootstrap() {
         defaultVersion: "1",
     });
 
+    app.enableCors({
+        origin: 'http://localhost:5173', // or true for all origins (not recommended for prod)
+        credentials: true,
+    });
+
     const config = new DocumentBuilder().setTitle("API").setDescription("API description").setVersion("1.0").build();
 
     const document = SwaggerModule.createDocument(app, config);

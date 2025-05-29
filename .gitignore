@@ -8,3 +8,5 @@ dist
 .env.production
 .env.test
 .env.test.local
+
+ThinkPad

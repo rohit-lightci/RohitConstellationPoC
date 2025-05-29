@@ -19,8 +19,13 @@
         "strictBindCallApply": false,
         "forceConsistentCasingInFileNames": false,
         "noFallthroughCasesInSwitch": false,
-        "esModuleInterop": true
+        "esModuleInterop": true,
+        "strictPropertyInitialization": false,
+        "composite": true
     },
-    "include": ["src/**/*", "test/**/*"],
-    "exclude": ["node_modules", "dist", "build"]
+    "include": ["src/**/*", "scripts/**/*", "test/**/*", "typeorm.config.ts", "package.json"],
+    "exclude": ["node_modules", "dist", "build"],
+    "references": [
+        { "path": "../../packages/types" }
+    ]
 }
