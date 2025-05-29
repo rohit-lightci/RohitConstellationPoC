@@ -20,7 +20,7 @@ export class ApiStack extends cdk.Stack {
             vpc,
             environment: props.environment,
             defaultDatabaseName: props.database.name,
-            dbUsername: "admin",
+            dbUsername: process.env.DB_USERNAME || "admin",
         });
     }
 }

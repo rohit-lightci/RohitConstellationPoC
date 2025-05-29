@@ -69,3 +69,4 @@ jobs:
           AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           NODE_ENV: ${{ github.event.inputs.environment || 'development' }}
+          DB_USERNAME: ${{ secrets.DB_USERNAME }}
