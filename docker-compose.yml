@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
-      POSTGRES_DB: rohit-constellation
+      POSTGRES_DB: rohit_constellation
     ports:
       - '54444:5432'
     volumes:

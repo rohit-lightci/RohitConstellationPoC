@@ -75,7 +75,7 @@ export class ApiStack extends cdk.Stack {
 
 
           apiService.targetGroup.configureHealthCheck({
-            path: "/health",
+            path: "/v1/health",
           });
     }
 }

@@ -7,7 +7,7 @@ import "dotenv/config";
 const DB = process.env.DB ? JSON.parse(process.env.DB) : {};
 
 const DB_HOST = DB.host ?? "localhost";
-const DB_PORT = parseInt(DB.port ?? "5432", 10);
+const DB_PORT = parseInt(DB.port ?? "54444", 10);
 const DB_USERNAME = DB.username ?? "postgres";
 const DB_PASSWORD = DB.password ?? "postgres";
 const DB_DATABASE = DB.dbname ?? "rohit_constellation";
