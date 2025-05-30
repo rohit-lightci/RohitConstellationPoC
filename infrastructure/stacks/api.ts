@@ -25,7 +25,7 @@ export class ApiStack extends cdk.Stack {
             environment: props.environment,
         });
 
-        const db = new RDS(this, "rohit-constellation-db", {
+        const db = new RDS(this, "db", {
             cdk: props,
             vpc,
             environment: props.environment,
