@@ -41,7 +41,7 @@ export class ApiStack extends cdk.Stack {
         });
         
 
-        const apiDockerFile = path.join(__dirname, '..', '..')
+        const apiDockerFile = path.join(__dirname, '..', '..', 'apps', 'api')
 
         const apiService = new pattern.ApplicationLoadBalancedFargateService(this, 'api-handler', {
             vpc: vpc.vpc,
