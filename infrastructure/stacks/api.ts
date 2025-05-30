@@ -30,7 +30,7 @@ export class ApiStack extends cdk.Stack {
             vpc,
             environment: props.environment,
             defaultDatabaseName: props.database.name,
-            dbUsername: process.env.DB_USERNAME || "admin",
+            dbUsername: process.env.DB_USERNAME || "postgres",
         });
 
         const wildcardSSLCert = certs.Certificate.fromCertificateArn(this, "wildcard-ssl-cert", props.domain.sslCertArn);

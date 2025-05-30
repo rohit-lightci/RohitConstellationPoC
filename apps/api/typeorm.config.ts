@@ -4,10 +4,10 @@ import { DataSource } from "typeorm";
 import "dotenv/config";
 
 const DB_HOST = process.env.DB_HOST ?? "localhost";
-const DB_PORT = parseInt(process.env.DB_PORT ?? "54444", 10);
+const DB_PORT = parseInt(process.env.DB_PORT ?? "5432", 10);
 const DB_USERNAME = process.env.DB_USERNAME ?? "postgres";
 const DB_PASSWORD = process.env.DB_PASSWORD ?? "postgres";
-const DB_DATABASE = process.env.DB_DATABASE ?? "rohit-constellation";
+const DB_DATABASE = process.env.DB_DATABASE ?? "rohit_constellation";
 
 console.log("DB CONFIG:", DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_DATABASE);
 
