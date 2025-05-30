@@ -4,7 +4,7 @@ import { Button } from './Button';
 import type { SessionData } from './SessionStepper';
 import { CreateSessionDto } from '@rohit-constellation/types';
 
-const API_URL = 'http://localhost:3000/v1';
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/v1';
 
 export const LaunchStep: React.FC<{ onBack: () => void; onContinue: () => void; sessionData: SessionData }> = ({ onBack, onContinue, sessionData }) => {
   const [loading, setLoading] = React.useState(false);
