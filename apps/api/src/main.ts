@@ -19,8 +19,7 @@ async function bootstrap() {
     });
 
     app.enableCors({
-        origin: 'http://localhost:5173', // or true for all origins (not recommended for prod)
-        credentials: true,
+        origin: '*',
     });
 
     const config = new DocumentBuilder().setTitle("API").setDescription("API description").setVersion("1.0").build();
