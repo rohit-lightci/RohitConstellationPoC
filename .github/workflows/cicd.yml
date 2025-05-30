@@ -60,7 +60,7 @@ jobs:
       - name: Build app
         run: pnpm build
 
-      - name: Deploy to Lambda
+      - name: Deploy
         run: pnpm exec cdk deploy -c config=${{ github.event.inputs.environment || 'development' }} --require-approval never
         working-directory: ./infrastructure
         env:
