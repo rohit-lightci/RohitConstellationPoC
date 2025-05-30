@@ -3,11 +3,11 @@ import { join } from "path";
 import { DataSource } from "typeorm";
 import "dotenv/config";
 
-const DB_HOST = process.env.DB_HOST ?? "localhost";
-const DB_PORT = parseInt(process.env.DB_PORT ?? "5432", 10);
-const DB_USERNAME = process.env.DB_USERNAME ?? "postgres";
-const DB_PASSWORD = process.env.DB_PASSWORD ?? "postgres";
-const DB_DATABASE = process.env.DB_DATABASE ?? "rohit_constellation";
+const DB_HOST = process.env.host ?? "localhost";
+const DB_PORT = parseInt(process.env.port ?? "5432", 10);
+const DB_USERNAME = process.env.username ?? "postgres";
+const DB_PASSWORD = process.env.password ?? "postgres";
+const DB_DATABASE = process.env.dbname ?? "rohit_constellation";
 
 console.log("DB CONFIG:", DB_HOST, DB_PORT, DB_USERNAME, DB_PASSWORD, DB_DATABASE);
 
