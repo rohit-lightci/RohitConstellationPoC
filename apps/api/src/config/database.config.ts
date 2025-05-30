@@ -1,11 +1,13 @@
 import { TypeOrmModuleOptions } from '@nestjs/typeorm';
 
+const DB = process.env.DB ? JSON.parse(process.env.DB) : {};
+
 export const databaseConfig: TypeOrmModuleOptions = {
   type: 'postgres',
-  host: process.env.host || 'localhost',
-  port: parseInt(process.env.port || '5432'),
-  username: process.env.username || 'postgres',
-  password: process.env.password || 'postgres',
+  host: DB.host || 'localhost',
+  port: parseInt(DB.port || '5432'),
+  username: DB.username || 'postgres',
+  password: DB.password || 'postgres',
   database: process.env.dbname || 'rohit_constellation',
   entities: [__dirname + '/../**/*.entity{.ts,.js}'],
   synchronize: false,
