@@ -42,7 +42,6 @@ export class ApiStack extends cdk.Stack {
         
 
         const apiDockerFile = path.join(__dirname, '..', '..')
-        const dockerfilePath = path.join('apps', 'api', 'Dockerfile')
 
         const apiService = new pattern.ApplicationLoadBalancedFargateService(this, 'api-handler', {
             vpc: vpc.vpc,
@@ -53,7 +52,6 @@ export class ApiStack extends cdk.Stack {
             taskImageOptions: {
               image: ecs.ContainerImage.fromAsset(apiDockerFile, {
                 platform: ecrAssets.Platform.LINUX_AMD64,
-                file: dockerfilePath,
               }),
               secrets: {
                 DB: ecs.Secret.fromSecretsManager(db.DBSecret),

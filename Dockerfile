@@ -33,4 +33,4 @@ WORKDIR /app/apps/api
 EXPOSE 3000
 
 # Run migrations and start the API
-CMD pnpm db:migrate && pnpm start:prod 
+CMD ["sh", "-c", "pnpm db:migrate && pnpm start:prod"] 
