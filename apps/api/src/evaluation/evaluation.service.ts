@@ -8,6 +8,7 @@ interface LLMEvaluationResponse {
   isSufficient: boolean;
   participantFeedback: string; // Renamed from 'feedback'
   analyticalFeedback?: string; // New optional field for detailed analysis
+  suggestedFollowUpType?: 'TEXT' | 'YES_NO' | 'RATING_1_5'; // New field
   // score?: number; // Optional: if you want the LLM to provide a score
 }
 
@@ -26,7 +27,7 @@ export class EvaluationService {
     response: string | number,
     originalQuestionTextContext?: string, // Text of the ultimate base question if current is a follow-up
     sectionGoalContext?: string // Goal of the current section
-  ): Promise<{ isSufficient: boolean; participantFeedback: string; analyticalFeedback?: string; score?: number }> {
+  ): Promise<{ isSufficient: boolean; participantFeedback: string; analyticalFeedback?: string; score?: number, suggestedFollowUpType?: 'TEXT' | 'YES_NO' | 'RATING_1_5' }> {
     this.logger.log(
       `Evaluating P-Role:${participantAssignedRole}'s answer to Q:${question.id} (Intent: ${question.intent}) in Session:"${sessionTitle}" (Response: ${response}) using LLM.`, 
     );
@@ -38,6 +39,7 @@ export class EvaluationService {
 
     Your primary goal is to determine if the answer is 'sufficient'.
     An answer is sufficient if it is clear, addresses the question's core intent and any stated goals, provides adequate detail, and demonstrates understanding.
+    Your goals is provide a concise, constructive feedback for the participant suggesting improvement which can lead to quantive responses such as yes/no or rating.
 
     If the answer is INSUFFICIENT, your feedback is crucial for generating a targeted follow-up question.
     Your response MUST be a JSON object.
@@ -46,9 +48,18 @@ export class EvaluationService {
     {"isSufficient": true, "participantFeedback": "concise positive feedback for the participant"}
 
     If an answer IS NOT SUFFICIENT, the JSON must be:
-    {"isSufficient": false, "participantFeedback": "concise, constructive feedback for the participant suggesting improvement", "analyticalFeedback": "detailed analysis of *why* the answer is insufficient. Pinpoint specific gaps, missing information, areas lacking depth, or unaddressed parts of the question/goals. This analysis will be used to formulate a follow-up question."}
+    {"isSufficient": false, "participantFeedback": "concise, constructive feedback for the participant suggesting improvement", "analyticalFeedback": "detailed analysis of *why* the answer is insufficient. Pinpoint specific gaps, missing information, areas lacking depth, or unaddressed parts of the question/goals. This analysis will be used to formulate a follow-up question.", "suggestedFollowUpType": "TEXT" | "YES_NO" | "RATING_1_5"}
+    
+    When suggesting a follow-up type:
+    - Suggest "TEXT" if the participant needs to elaborate broadly, explain reasoning, or provide more detailed examples.
+    - Suggest "YES_NO" if a quick, specific confirmation or a binary clarification on a particular point from their answer is most efficient.
+    - Suggest "RATING_1_5" if a quantifiable measure of agreement, importance, satisfaction, confidence, or impact would be beneficial to understand their stance better.
 
-    Focus on identifying the *core reasons* for insufficiency in the 'analyticalFeedback'.`;
+    The goal is to extract underlying reasons, motivations, or assumptions along with QUANTITATIVE responses.
+
+    Focus on identifying the *core reasons* for insufficiency in the 'analyticalFeedback'.
+    
+    If needed, you can also ask a yes/no question or a rating question to the participant to get more quantitative information.`;
 
     let userMessageContent = `Please evaluate the following answer based on the provided context.\n\n`;
 
@@ -81,7 +92,8 @@ export class EvaluationService {
         this.logger.error('LLM returned no response string for evaluation.');
         return {
           isSufficient: false,
-          participantFeedback: 'Automated evaluation could not be performed at this time. Please ensure your answer is comprehensive.'
+          participantFeedback: 'Automated evaluation could not be performed at this time. Please ensure your answer is comprehensive.',
+          suggestedFollowUpType: 'TEXT' // Default suggestion on error
         };
       }
 
@@ -92,15 +104,17 @@ export class EvaluationService {
         this.logger.error('LLM response for evaluation is not in the expected JSON format (missing isSufficient or participantFeedback).', parsedResponse);
         return {
           isSufficient: false,
-          participantFeedback: 'Automated evaluation result was unclear. Please ensure your answer is comprehensive.'
+          participantFeedback: 'Automated evaluation result was unclear. Please ensure your answer is comprehensive.',
+          suggestedFollowUpType: 'TEXT' // Default suggestion on error
         };
       }
       
-      this.logger.log(`LLM Evaluation for Q:${question.id} - Sufficient: ${parsedResponse.isSufficient}, ParticipantFeedback: ${parsedResponse.participantFeedback}, AnalyticalFeedback: ${parsedResponse.analyticalFeedback || 'N/A'}`);
+      this.logger.log(`LLM Evaluation for Q:${question.id} - Sufficient: ${parsedResponse.isSufficient}, ParticipantFeedback: ${parsedResponse.participantFeedback}, AnalyticalFeedback: ${parsedResponse.analyticalFeedback || 'N/A'}, SuggestedFollowUpType: ${parsedResponse.suggestedFollowUpType || 'N/A'}`);
       return {
         isSufficient: parsedResponse.isSufficient,
         participantFeedback: parsedResponse.participantFeedback,
         analyticalFeedback: parsedResponse.analyticalFeedback,
+        suggestedFollowUpType: parsedResponse.suggestedFollowUpType,
         // score: parsedResponse.score // if you re-introduce score
       };
 
@@ -109,7 +123,8 @@ export class EvaluationService {
       this.logger.error(`Error during LLM evaluation for Q:${question.id}: ${errorMessage}`, error instanceof Error ? error.stack : undefined);
       return {
         isSufficient: false,
-        participantFeedback: 'An error occurred during automated evaluation. Please ensure your answer is thorough.'
+        participantFeedback: 'An error occurred during automated evaluation. Please ensure your answer is thorough.',
+        suggestedFollowUpType: 'TEXT' // Default suggestion on error
       };
     }
   }

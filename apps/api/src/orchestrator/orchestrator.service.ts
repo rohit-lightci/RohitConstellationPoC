@@ -240,23 +240,44 @@ export class OrchestratorService {
     sessionTitle: string,
     sessionDescription: string | undefined,
     participantAssignedRole: string,
-    similarAnswersContext: FormattedSimilarAnswerContext[] | null
+    similarAnswersContext: FormattedSimilarAnswerContext[] | null,
+    suggestedFollowUpType: 'TEXT' | 'YES_NO' | 'RATING_1_5'
   ): Promise<{ nextQuestion: Question | null; newFollowUpQuestionForSessionPersistence: Question | null }> {
-    this.logger.log(`Attempting to generate LLM follow-up for P:${participant.id} (Role: ${participantAssignedRole}), BaseQ:${baseQuestionIdForFollowUp} in Session: "${sessionTitle}", SimilarContexts: ${similarAnswersContext ? similarAnswersContext.length : 0} (Follow-up attempt ${ (participantQueue.followUpCounts[baseQuestionIdForFollowUp] || 0) + 1})`);
+    this.logger.log(`Attempting to generate LLM follow-up for P:${participant.id} (Role: ${participantAssignedRole}), BaseQ:${baseQuestionIdForFollowUp} in Session: "${sessionTitle}". Instructed type: ${suggestedFollowUpType}. (Follow-up attempt ${ (participantQueue.followUpCounts[baseQuestionIdForFollowUp] || 0) + 1})`);
 
-    const llmSystemPrompt = `You are an expert session facilitator and critical thinker. Your goal is to generate a *single, concise, and insightful* follow-up question when a participant's answer is insufficient.
-    Avoid generic requests like "Can you provide more examples?". Instead, aim to:
-    - Uncover *underlying reasons, motivations, or assumptions*.
-    - Explore the *impact, consequences, or significance* of their statement.
-    - Encourage *reflection on alternatives or different perspectives*.
-    - Identify *key learnings or deeper insights*.
-    - If the answer is vague, ask for *clarification on a specific part* of their statement rather than general elaboration.
+    // Determine the required prefix based on the suggestedFollowUpType
+    let requiredPrefix = '[TEXT]';
+    if (suggestedFollowUpType === 'YES_NO') {
+      requiredPrefix = '[YES_NO]';
+    } else if (suggestedFollowUpType === 'RATING_1_5') {
+      requiredPrefix = '[RATING_1_5]';
+    }
 
-    The question should be direct, easy to understand, and tailored to the context provided.
-    The overall goal of this session (titled '${sessionTitle}') is: ${sessionDescription || 'Not specified'}.
-    The participant (Role: '${participantAssignedRole}') needs further prompting.`;
+    const llmSystemPrompt = `You are an expert session facilitator and critical thinker. Your goal is to generate a *single, concise, focused, and insightful* follow-up question of a specific type when a participant's answer is insufficient.
 
-    let llmUserPrompt = `The participant just answered a question, but their answer was deemed insufficient.\n`;
+The required type for this follow-up question is: ${suggestedFollowUpType}.
+Your response *must* start with the prefix \`${requiredPrefix}\` followed by the question itself.
+
+For example, if the required type is RATING_1_5, your question should look like: "[RATING_1_5] On a scale of 1 to 5, how clear was the objective?"
+If the required type is YES_NO, your question should look like: "[YES_NO] Was this the primary challenge?"
+If the required type is TEXT, your question should look like: "[TEXT] Can you elaborate on the main obstacles?"
+
+Use the provided context and analytical feedback to craft a high-quality question of the specified type (${suggestedFollowUpType}).
+
+General Guidelines for Quality Follow-up Questions:
+- Aim to uncover *underlying reasons, motivations, or assumptions*.
+- Explore the *impact, consequences, or significance*.
+- Encourage *reflection on alternatives or different perspectives*.
+- Identify *key learnings or deeper insights*.
+- If the answer is vague, ask for *clarification on a specific part* of their statement rather than general elaboration.
+- Avoid overly broad, multi-part, or leading questions. Keep it focused on one key area.
+
+The question should be direct, easy to understand, and tailored to the context provided.
+Session Title: '${sessionTitle}'
+Session Goal: ${sessionDescription || 'Not specified'}
+Participant Role: '${participantAssignedRole}'`;
+
+    let llmUserPrompt = `The participant just answered a question, but their answer was deemed insufficient. You must generate a follow-up question of type: ${suggestedFollowUpType}.\n`;
 
     if (answeredQuestionObject.intent === 'FOLLOW_UP') {
         llmUserPrompt += `Context: The participant is responding to a series of questions. The original question in this series was: "${originalBaseQuestionTextForLLMPrompt}"\n`;
@@ -268,12 +289,14 @@ export class OrchestratorService {
     llmUserPrompt += `Participant's Insufficient Answer: "${typeof response === 'string' ? response : JSON.stringify(response)}"\n`;
     llmUserPrompt += `Reason for Insufficiency (Feedback from evaluation): "${evaluationResultAnalyticalFeedback || 'No specific feedback provided, but the answer needs more depth.'}"\n\n`;
 
-    llmUserPrompt += `Consider the following approaches for your follow-up question:\n`;
+    llmUserPrompt += `Consider the following approaches for your follow-up question:
+`;
     llmUserPrompt += `1.  **Clarification:** If a specific part of the answer is ambiguous, ask for clarification on *that part*. (e.g., "When you mentioned 'X', what did you specifically mean by that?")\n`;
     llmUserPrompt += `2.  **Probing for Reasons/Motivations:** Ask *why* they hold that view or made that statement. (e.g., "What led you to that conclusion about 'Y'?")\n`;
     llmUserPrompt += `3.  **Exploring Impact/Consequences:** Ask about the effects or results of what they described. (e.g., "What was the primary impact of 'Z' on the outcome?")\n`;
     llmUserPrompt += `4.  **Seeking Elaboration on Depth/Insight:** If the answer is superficial, ask for a deeper dive into a key aspect. (e.g., "Could you elaborate on the most critical factor in 'A'?")\n`;
-    llmUserPrompt += `5.  **Considering Alternatives/Trade-offs:** If appropriate, ask about other options or why the stated one was chosen. (e.g., "Were other approaches like 'B' considered, and if so, why was this one preferred?")\n\n`;
+    llmUserPrompt += `5.  **Considering Alternatives/Trade-offs:** If appropriate, ask about other options or why the stated one was chosen. (e.g., "Were other approaches like 'B' considered, and if so, why was this one preferred?")\n`;
+    llmUserPrompt += `\n`;
 
     if (similarAnswersContext && similarAnswersContext.length > 0) {
       llmUserPrompt += `For additional context, here are some relevant past answers from other participants on similar topics (higher score means more similar):\n`;
@@ -285,7 +308,7 @@ export class OrchestratorService {
       llmUserPrompt += 'Please consider this context when formulating your follow-up question to potentially highlight gaps, common themes, or ask for differentiation from these other answers.\n';
     }
 
-    llmUserPrompt += `\nBased on all the above, generate a *single, concise, and insightful* follow-up question for the participant. Focus on ONE key area for improvement. Do not be conversational. Just provide the question text.`;
+    llmUserPrompt += `\nBased on all the above, and focusing on the analytical feedback provided, generate a *single, concise, focused, and insightful* follow-up question for the participant. Your response *must* start with the prefix \`${requiredPrefix}\` (as the required question type is ${suggestedFollowUpType}).`;
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         { role: 'system', content: llmSystemPrompt },
@@ -297,15 +320,54 @@ export class OrchestratorService {
     let llmGeneratedFollowUpText = '';
     try {
         llmGeneratedFollowUpText = await this.llmService.generateChatCompletion(messages, undefined, 0.5);
-        llmGeneratedFollowUpText = llmGeneratedFollowUpText.replace(/^"|"$/g, '').trim();
+        // llmGeneratedFollowUpText = llmGeneratedFollowUpText.replace(/^"|"$/g, '').trim(); // Trim quotes after parsing prefix
     } catch (llmError) {
         this.logger.error(`LLM call for follow-up generation failed: ${llmError instanceof Error ? llmError.message : String(llmError)}`);
     }
 
-    if (!llmGeneratedFollowUpText) {
+    if (!llmGeneratedFollowUpText.trim()) {
         this.logger.warn('LLM failed to generate follow-up question text or returned empty. Falling back to generic prompt.');
         const fallbackDetail = evaluationResultAnalyticalFeedback ? `Specifically, consider: ${evaluationResultAnalyticalFeedback}` : 'Please provide more detail.';
-        llmGeneratedFollowUpText = `Please elaborate further on your previous answer regarding "${answeredQuestionObject.text.substring(0,50)}...". ${fallbackDetail}`;
+        // Fallback respects the suggestedFollowUpType for its prefix
+        llmGeneratedFollowUpText = `${requiredPrefix} Please elaborate further on your previous answer regarding "${answeredQuestionObject.text.substring(0,50)}...". ${fallbackDetail}`;
+    }
+
+    console.log('llmGeneratedFollowUpText >>>>>>>>>>>>>>>>>>>>> ', llmGeneratedFollowUpText);
+    
+    let questionText = '';
+    // Type assertion for AnswerDataType. You might need to adjust 'string', 'boolean', 'number'
+    // if AnswerDataType is an enum or has different literal values from the 'type' property of Question.
+    let questionAnswerDataType: any = 'string'; // Defaulting to string, will be updated based on prefix.
+    let displayHint: 'TEXT' | 'YES_NO' | 'RATING_1_5' = 'TEXT';
+    let options: string[] | undefined = undefined;
+
+    if (llmGeneratedFollowUpText.startsWith('[TEXT] ')) {
+        displayHint = 'TEXT';
+        questionText = llmGeneratedFollowUpText.substring('[TEXT] '.length).trim();
+        questionAnswerDataType = 'string'; // Corresponds to an open text answer
+    } else if (llmGeneratedFollowUpText.startsWith('[YES_NO] ')) {
+        displayHint = 'YES_NO';
+        questionText = llmGeneratedFollowUpText.substring('[YES_NO] '.length).trim();
+        questionAnswerDataType = 'boolean'; // Corresponds to a boolean answer
+        options = ['Yes', 'No'];
+    } else if (llmGeneratedFollowUpText.startsWith('[RATING_1_5] ')) {
+        displayHint = 'RATING_1_5';
+        questionText = llmGeneratedFollowUpText.substring('[RATING_1_5] '.length).trim();
+        questionAnswerDataType = 'number'; // Corresponds to a numerical answer
+        options = ['1', '2', '3', '4', '5'];
+    } else {
+        this.logger.warn(`LLM response "${llmGeneratedFollowUpText}" missing expected prefix or prefix is not at the very beginning. Defaulting to TEXT type and using full response as question.`);
+        questionText = llmGeneratedFollowUpText.replace(/^"|"$/g, '').trim(); // Clean potential surrounding quotes
+        questionAnswerDataType = 'string'; 
+        displayHint = 'TEXT';
+    }
+
+    if (!questionText) { // If after stripping prefix, question is empty
+        this.logger.warn('LLM generated an empty question after stripping prefix. Using fallback text.');
+        const fallbackDetail = evaluationResultAnalyticalFeedback ? `Specifically, consider: ${evaluationResultAnalyticalFeedback}` : 'Please provide more detail.';
+        questionText = `Please elaborate further on your previous answer regarding "${answeredQuestionObject.text.substring(0,50)}...". ${fallbackDetail}`;
+        displayHint = 'TEXT';
+        questionAnswerDataType = 'string';
     }
     
     const currentFollowUpCountForBase = participantQueue.followUpCounts[baseQuestionIdForFollowUp] || 0;
@@ -313,15 +375,20 @@ export class OrchestratorService {
     
     const generatedFollowUp: Question = {
       id: uuidv4(),
-      text: llmGeneratedFollowUpText,
-      type: answeredQuestionObject.type,
+      text: questionText,
+      type: questionAnswerDataType, // Set the answer data type based on parsed prefix
+      // displayHint and options are new properties.
+      // You will need to update the Question type definition in @rohit-constellation/types
+      // For now, we cast to allow these properties.
+      displayHint: displayHint,
+      options: options,
       intent: 'FOLLOW_UP',
       sectionId: answeredQuestionObject.sectionId,
       parentQuestionId: baseQuestionIdForFollowUp,
       generatedForParticipantId: participant.id,
       order: newFollowUpOrder,
       goal: `To clarify or expand upon the previous insufficient answer related to: ${originalBaseQuestionTextForLLMPrompt?.substring(0,70)}...`,
-    };
+    } as Question & { displayHint?: 'TEXT' | 'YES_NO' | 'RATING_1_5'; options?: string[] };
 
     participantQueue.questions.splice(participantQueue.currentQuestionIndex + 1, 0, generatedFollowUp);
     participantQueue.followUpCounts[baseQuestionIdForFollowUp]++;
@@ -372,11 +439,11 @@ export class OrchestratorService {
     participant: Participant,
     answeredQuestionObject: Question,
     response: string | number, 
-    evaluationResult: { isSufficient: boolean; participantFeedback?: string; analyticalFeedback?: string; score?: number },
+    evaluationResult: { isSufficient: boolean; participantFeedback?: string; analyticalFeedback?: string; score?: number; suggestedFollowUpType?: 'TEXT' | 'YES_NO' | 'RATING_1_5' },
     participantQueue: ParticipantQueueCache,
     similarAnswersContext: FormattedSimilarAnswerContext[] | null
   ): Promise<{ nextQuestion: Question | null; participantCompletedSession: boolean; newFollowUpQuestionForSessionPersistence: Question | null }> {
-    this.logger.log(`Answer to Q:${answeredQuestionObject.id} by P:${participant.id} was insufficient. AnalyticalFeedback: "${evaluationResult.analyticalFeedback || evaluationResult.participantFeedback || 'N/A'}". Handling follow-up. Similar contexts: ${similarAnswersContext ? similarAnswersContext.length : 0}`);
+    this.logger.log(`Answer to Q:${answeredQuestionObject.id} by P:${participant.id} was insufficient. AnalyticalFeedback: "${evaluationResult.analyticalFeedback || evaluationResult.participantFeedback || 'N/A'}". Suggested FU Type: ${evaluationResult.suggestedFollowUpType || 'Defaulting to TEXT'}. Handling follow-up. Similar contexts: ${similarAnswersContext ? similarAnswersContext.length : 0}`);
     
     let baseQuestionIdForFollowUp: string;
     let baseQuestionOrderForFollowUp: number;
@@ -417,7 +484,8 @@ export class OrchestratorService {
         session.title,
         session.description,
         participant.role,
-        similarAnswersContext // <-- Pass the context here
+        similarAnswersContext, // <-- Pass the context here
+        evaluationResult.suggestedFollowUpType || 'TEXT' // Pass suggested type, default to TEXT if undefined
       );
       return { ...followUpResult, participantCompletedSession: false };
     } else {

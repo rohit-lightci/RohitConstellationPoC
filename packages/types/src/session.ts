@@ -3,7 +3,7 @@ export type SessionStatus = 'DRAFT' | 'ACTIVE' | 'COMPLETED';
 export type ParticipantStatus = 'ACTIVE' | 'INACTIVE' | 'COMPLETED';
 export type SectionType = 'MAD' | 'SAD' | 'GLAD' | 'CUSTOM';
 export type SectionStatus = 'PENDING' | 'ACTIVE' | 'COMPLETED';
-export type QuestionType = 'TEXT' | 'RATING' | 'MULTIPLE_CHOICE' | 'AGREE_DISAGREE';
+export type QuestionType = 'TEXT' | 'RATING_1_5' | 'MULTIPLE_CHOICE' | 'AGREE_DISAGREE' | 'YES_NO';
 export type QuestionIntent = 'BASE' | 'FOLLOW_UP' | 'CROSS_POLLINATION';
 
 
