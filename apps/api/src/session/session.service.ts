@@ -59,6 +59,7 @@ export class SessionService {
         participants: sessionEntity.participants as TypesParticipant[], 
         sections: sessionEntity.sections as TypesSection[],
         version: sessionEntity.version,
+        generatedReportJson: sessionEntity.generatedReportJson,
     };
   }
   

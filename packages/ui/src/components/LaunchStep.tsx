@@ -12,36 +12,13 @@ export const LaunchStep: React.FC<{ onBack: () => void; onContinue: () => void; 
   const handleLaunch = async () => {
     setLoading(true);
     try {
-      // create sessionDto
-      const sessionDto: CreateSessionDto = {
-        template: 'retro',
-        title: sessionData.title,
-        type: 'RETRO',
-        globalTimeLimit: sessionData.duration,
-        expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24),
-        createdBy: 'admin',
-        isAnonymous: false,
-        participationRule: 'all',
-        description: '',
-        permissions: {
-          askQuestions: true,
-          reactUpvote: true,
-          seeResponses: true
-        }
-      };
-      const response = await fetch(`${API_URL}/sessions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(sessionDto),
-      });
-      if (response.ok) {
-        await response.json();
-        onContinue();
-      } else {
-        console.error('Failed to create session');
-      }
+      // The session is expected to have been created in a previous step (ParticipationStep).
+      // This function's role is now to signal continuation to the parent stepper,
+      // which will then proceed to the WaitingLobby with the existing session ID.
+      onContinue();
     } catch (e) {
-      console.error('Error creating session');
+      console.error('Error proceeding from LaunchStep:', e);
+      // Optionally, you could set an error state here if LaunchStep needs to handle it locally.
     } finally {
       setLoading(false);
     }

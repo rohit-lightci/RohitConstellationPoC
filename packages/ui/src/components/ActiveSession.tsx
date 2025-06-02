@@ -173,6 +173,27 @@ export const ActiveSession: React.FC = () => {
     }
   };
 
+  // Function to handle option-based answers (Yes/No, Rating)
+  const handleOptionSubmit = async (optionValue: string) => {
+    if (!currentQuestion?.id || !participantIdRef.current) {
+      return;
+    }
+    setError(null);
+    setIsLoadingNextQuestion(true);
+    // Set currentAnswer for clarity if needed, though it's directly passed to submitAnswer
+    // setCurrentAnswer(optionValue); 
+
+    try {
+      // Pass optionValue directly instead of relying on currentAnswer state for immediate submits
+      const ack = await websocketService.submitAnswer(currentQuestion.id, optionValue, participantIdRef.current);
+      console.log(`[ActiveSession] Answer (${optionValue}) submission acknowledged by server:`, ack);
+      setCurrentAnswer(''); // Clear textarea state if it was somehow used, or for general reset
+    } catch (err: any) {
+      setError(err?.message || 'Failed to submit answer. Please try again.');
+      setIsLoadingNextQuestion(false);
+    }
+  };
+
   // console.log(
   //   '[ActiveSession] Rendering - isLoadingNextQuestion:', isLoadingNextQuestion, 
   //   'isCompleted:', isCompleted, 
@@ -252,7 +273,7 @@ export const ActiveSession: React.FC = () => {
           )}
         </div>
 
-        {currentQuestion && (
+        {currentQuestion && ((currentQuestion as any).displayHint === 'TEXT' || !(currentQuestion as any).displayHint) && (
           <div className="mb-8">
             <textarea
               className="w-full border rounded-lg p-4 mb-2 min-h-[100px] resize-none"
@@ -272,6 +293,40 @@ export const ActiveSession: React.FC = () => {
             </div>
           </div>
         )}
+
+        {currentQuestion && (currentQuestion as any).displayHint === 'YES_NO' && (
+          <div className="mb-8 flex justify-center space-x-4">
+            {((currentQuestion as any).options && (currentQuestion as any).options.length > 0 ? (currentQuestion as any).options : ['Yes', 'No']).map((option: string) => (
+              <button
+                key={option}
+                className="px-8 py-3 rounded-lg bg-blue-600 text-white font-semibold text-lg hover:bg-blue-700 disabled:bg-gray-400 transition-colors duration-150 ease-in-out"
+                disabled={isLoadingNextQuestion || isCompleted}
+                onClick={() => handleOptionSubmit(option)}
+              >
+                {option}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {currentQuestion && (currentQuestion as any).displayHint === 'RATING_1_5' && (
+          <div className="mb-8">
+            <p className="text-center text-gray-600 mb-4">Rate on a scale of 1 to 5:</p>
+            <div className="flex justify-center space-x-2">
+              {((currentQuestion as any).options && (currentQuestion as any).options.length > 0 ? (currentQuestion as any).options : ['1', '2', '3', '4', '5']).map((option: string) => (
+                <button
+                  key={option}
+                  className="w-12 h-12 rounded-full border-2 border-blue-600 text-blue-600 font-semibold text-lg hover:bg-blue-600 hover:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-opacity-50 disabled:bg-gray-200 disabled:text-gray-400 disabled:border-gray-300 transition-all duration-150 ease-in-out flex items-center justify-center"
+                  disabled={isLoadingNextQuestion || isCompleted}
+                  onClick={() => handleOptionSubmit(option)}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div className="space-y-4 mt-8">
           {answers.map((answer) => (
             <div key={answer.id} className="border rounded-lg p-4 bg-gray-50">
