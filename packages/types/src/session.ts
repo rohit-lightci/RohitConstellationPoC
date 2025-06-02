@@ -28,6 +28,7 @@ export interface Session {
   };
   participants: Participant[];
   sections: Section[];
+  generatedReportJson?: string;
 }
 
 export interface Participant {

@@ -15,20 +15,20 @@ export class HighlightService {
     constructor(private readonly llmService: LLMService) {}
 
     private buildContextForLLM(reportData: ReportGenerationData): string {
-        let context = `Session Title: ${reportData.session.title}\n`;
+        let context = `Session Title: ${reportData.session.title}\\n`;
         if (reportData.session.description) {
-            context += `Session Description: ${reportData.session.description}\n`;
+            context += `Session Description: ${reportData.session.description}\\n`;
         }
-        context += "\nTranscript:\n";
+        context += "\\nTranscript:\\n";
 
         const sessionSections = reportData.session.sections;
         const sessionAnswers = reportData.answers;
 
         for (const section of sessionSections) {
-            context += `\n---\nSection: ${section.type} (Goal: ${section.goal || "N/A"})\n`;
+            context += `\\n---\\nSection ID: ${section.id}\\nSection Name: ${section.name}\\nSection Type: ${section.type}\\n(Goal: ${section.goal || "N/A"})\\n`;
             const questionsInSection = section.questions;
             for (const question of questionsInSection) {
-                context += `  Question: ${question.text}\n`;
+                context += `  Question: ${question.text}\\n`;
                 const answersToQuestion = sessionAnswers.filter((ans) => ans.questionId === question.id);
                 if (answersToQuestion.length > 0) {
                     for (const answer of answersToQuestion) {
@@ -36,14 +36,14 @@ export class HighlightService {
                         const participantIdentifier = participant
                             ? `Participant (Role: ${participant.role})`
                             : "Unknown Participant";
-                        context += `    ${participantIdentifier} answered: ${answer.response}\n`;
+                        context += `    ${participantIdentifier} answered: ${answer.response}\\n`;
                     }
                 } else {
-                    context += "    (No responses to this question)\n";
+                    context += "    (No responses to this question)\\n";
                 }
             }
         }
-        context += "---\n";
+        context += "---\\n";
         return context;
     }
 
@@ -52,9 +52,9 @@ export class HighlightService {
 
         const transcriptContext = this.buildContextForLLM(reportData);
 
-        const systemPrompt = `You are an expert AI assistant. Your task is to analyze a session transcript and generate a concise report. The report should include key highlights for each session section and a list of actionable items. Your response MUST be a valid JSON object that strictly conforms to the TypeScript interface SessionReport provided below. Do NOT include any explanatory text or markdown formatting before or after the JSON object.\n\n    Interface Definition:\n    \`\`\`typescript\n    interface SessionReportSection {\n      sectionId: string; // The ID of the section from the transcript\n      sectionTitle: string; // The title/name (e.g., type like 'MAD', 'GLAD') of the section from the transcript\n      highlights: string[]; // Array of 2-4 concise highlight strings for this section based on participant answers\n    }\n\n    interface SessionReportActionItem {\n      description: string; // A specific, actionable task derived from the discussion\n    }\n\n    export interface SessionReport {\n      sessionId: string; // The ID of the session\n      sessionTitle: string; // The title of the session\n      overallSummary?: string; // Optional: A brief 1-2 sentence summary of the entire session\n      sections: SessionReportSection[]; // Array of report sections\n      actionItems: SessionReportActionItem[]; // Array of action items\n    }\n    \`\`\`\n    `;
+        const systemPrompt = `You are an expert AI assistant. Your task is to analyze a session transcript and generate a concise report. The report should include key highlights for each session section and a list of actionable items. Your response MUST be a valid JSON object that strictly conforms to the TypeScript interface SessionReport provided below. Do NOT include any explanatory text or markdown formatting before or after the JSON object.\\n\\n    Interface Definition:\\n    \\\`\\\`\\\`typescript\\n    interface SessionReportSection {\\n      sectionId: string; // The actual ID (e.g., UUID) of the section from the transcript (use the value of 'Section ID')\\n      sectionTitle: string; // The descriptive name of the section from the transcript (use the value of 'Section Name'). For predefined types like 'MAD', 'GLAD', if 'Section Name' is generic, you can use the 'Section Type' as a fallback.\\n      highlights: string[]; // Array of 2-4 concise highlight strings for this section based on participant answers\\n    }\\n\\n    interface SessionReportActionItem {\\n      description: string; // A specific, actionable task derived from the discussion\\n    }\\n\\n    export interface SessionReport {\\n      sessionId: string; // The ID of the session\\n      sessionTitle: string; // The title of the session\\n      overallSummary?: string; // Optional: A brief 1-2 sentence summary of the entire session\\n      sections: SessionReportSection[]; // Array of report sections\\n      actionItems: SessionReportActionItem[]; // Array of action items\\n    }\\n    \\\`\\\`\\\`\\n    `;
 
-        const userPrompt = `Please analyze the following session transcript and generate the report as a JSON object according to the SessionReport interface provided in the system prompt.\n\n    Session ID: ${reportData.session.id}\n    Session Title: ${reportData.session.title}\n\n    ${transcriptContext}\n\n    Ensure sectionId in your JSON output matches the actual IDs of the sections from the transcript, and sectionTitle matches the section type (e.g., 'MAD', 'GLAD').\n    Generate the JSON object now.`;
+        const userPrompt = `Please analyze the following session transcript and generate the report as a JSON object according to the SessionReport interface provided in the system prompt.\\n\\n    Session ID: ${reportData.session.id}\\n    Session Title: ${reportData.session.title}\\n\\n    ${transcriptContext}\\n\\n    Ensure 'sectionId' in your JSON output matches the 'Section ID' (UUID) from the transcript, and 'sectionTitle' matches the 'Section Name' from the transcript for each section.\\n    Generate the JSON object now.`;
 
         const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
             {role: "system", content: systemPrompt},

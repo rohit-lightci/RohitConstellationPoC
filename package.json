@@ -19,7 +19,7 @@
     "lint-staged": "lint-staged",
     "cdk": "pnpm --filter infrastructure cdk",
     "db:up": "docker-compose up -d postgres",
-    "db:down": "docker-compose down"
+    "db:down": "docker-compose down -v"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx}": [

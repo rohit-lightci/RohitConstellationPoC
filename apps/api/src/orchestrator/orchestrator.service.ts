@@ -243,9 +243,8 @@ export class OrchestratorService {
     similarAnswersContext: FormattedSimilarAnswerContext[] | null,
     suggestedFollowUpType: 'TEXT' | 'YES_NO' | 'RATING_1_5'
   ): Promise<{ nextQuestion: Question | null; newFollowUpQuestionForSessionPersistence: Question | null }> {
-    this.logger.log(`Attempting to generate LLM follow-up for P:${participant.id} (Role: ${participantAssignedRole}), BaseQ:${baseQuestionIdForFollowUp} in Session: "${sessionTitle}". Instructed type: ${suggestedFollowUpType}. (Follow-up attempt ${ (participantQueue.followUpCounts[baseQuestionIdForFollowUp] || 0) + 1})`);
+    this.logger.log(`Attempting to generate LLM follow-up for P:${participant.id} (Role: ${participantAssignedRole}), BaseQ:${baseQuestionIdForFollowUp} in Session:"${sessionTitle}". Instructed type: ${suggestedFollowUpType}. (Follow-up attempt ${ (participantQueue.followUpCounts[baseQuestionIdForFollowUp] || 0) + 1})`);
 
-    // Determine the required prefix based on the suggestedFollowUpType
     let requiredPrefix = '[TEXT]';
     if (suggestedFollowUpType === 'YES_NO') {
       requiredPrefix = '[YES_NO]';
@@ -253,31 +252,32 @@ export class OrchestratorService {
       requiredPrefix = '[RATING_1_5]';
     }
 
-    const llmSystemPrompt = `You are an expert session facilitator and critical thinker. Your goal is to generate a *single, concise, focused, and insightful* follow-up question of a specific type when a participant's answer is insufficient.
+    const llmSystemPrompt = `You are an expert AI assistant acting as an insightful Socratic questioner and Insight Facilitator. 
+Your primary objective is to help participants deepen their thinking and provide more complete, well-reasoned responses by asking targeted follow-up questions.
+The \`analyticalFeedback\` you will receive is paramount. It explains *why* the previous answer was insufficient. 
+Your follow-up question *must directly address and aim to resolve* the specific issues raised in this \`analyticalFeedback\`.
 
 The required type for this follow-up question is: ${suggestedFollowUpType}.
-Your response *must* start with the prefix \`${requiredPrefix}\` followed by the question itself.
+Your response *must* start with the prefix \`${requiredPrefix}\` followed by the question itself. 
+Do not add any other text before or after the prefixed question.
 
-For example, if the required type is RATING_1_5, your question should look like: "[RATING_1_5] On a scale of 1 to 5, how clear was the objective?"
-If the required type is YES_NO, your question should look like: "[YES_NO] Was this the primary challenge?"
-If the required type is TEXT, your question should look like: "[TEXT] Can you elaborate on the main obstacles?"
-
-Use the provided context and analytical feedback to craft a high-quality question of the specified type (${suggestedFollowUpType}).
+Question Type Guidance (always driven by \`analyticalFeedback\`):
+- If ${suggestedFollowUpType} is 'TEXT': Formulate an open-ended question that prompts the participant to provide the specific information, reasoning, or examples identified as missing or unclear in the \`analyticalFeedback\`. For instance, if feedback indicates 'The underlying assumptions were not stated,' ask, '[TEXT] What were the key assumptions you made when formulating your previous answer?' Avoid generic 'tell me more' or 'can you elaborate' unless the feedback specifically guides towards that.
+- If ${suggestedFollowUpType} is 'YES_NO': Use the \`analyticalFeedback\` to craft a question that seeks a direct confirmation or denial related to the core insufficiency. For instance, if feedback suggests 'It's unclear if this was the sole factor considered,' ask, '[YES_NO] Was that the sole factor you considered?'
+- If ${suggestedFollowUpType} is 'RATING_1_5': Your question should ask the participant to quantify an aspect directly related to the \`analyticalFeedback\`. For example, if feedback notes 'The perceived importance of this point is ambiguous,' ask, '[RATING_1_5] On a scale of 1 (Low Importance) to 5 (High Importance), how would you rate the importance of this point?'
 
 General Guidelines for Quality Follow-up Questions:
 - Aim to uncover *underlying reasons, motivations, or assumptions*.
 - Explore the *impact, consequences, or significance*.
-- Encourage *reflection on alternatives or different perspectives*.
-- Identify *key learnings or deeper insights*.
-- If the answer is vague, ask for *clarification on a specific part* of their statement rather than general elaboration.
-- Avoid overly broad, multi-part, or leading questions. Keep it focused on one key area.
-
-The question should be direct, easy to understand, and tailored to the context provided.
+- If the answer is vague, ask for *clarification on a specific part* of their statement highlighted by the \`analyticalFeedback\`.
+- Avoid overly broad, multi-part, or leading questions. Keep it focused on one key area derived from the \`analyticalFeedback\`.
+The question should be direct, easy to understand, and precisely tailored to the context and feedback.
 Session Title: '${sessionTitle}'
 Session Goal: ${sessionDescription || 'Not specified'}
 Participant Role: '${participantAssignedRole}'`;
 
-    let llmUserPrompt = `The participant just answered a question, but their answer was deemed insufficient. You must generate a follow-up question of type: ${suggestedFollowUpType}.\n`;
+    let llmUserPrompt = `The participant just answered a question, but their answer was deemed insufficient based on the provided analytical feedback. 
+You must generate a follow-up question of type: ${suggestedFollowUpType}.\n`;
 
     if (answeredQuestionObject.intent === 'FOLLOW_UP') {
         llmUserPrompt += `Context: The participant is responding to a series of questions. The original question in this series was: "${originalBaseQuestionTextForLLMPrompt}"\n`;
@@ -287,28 +287,28 @@ Participant Role: '${participantAssignedRole}'`;
     }
 
     llmUserPrompt += `Participant's Insufficient Answer: "${typeof response === 'string' ? response : JSON.stringify(response)}"\n`;
-    llmUserPrompt += `Reason for Insufficiency (Feedback from evaluation): "${evaluationResultAnalyticalFeedback || 'No specific feedback provided, but the answer needs more depth.'}"\n\n`;
-
-    llmUserPrompt += `Consider the following approaches for your follow-up question:
+    llmUserPrompt += `Reason for Insufficiency (Analytical Feedback from evaluation): "${evaluationResultAnalyticalFeedback || 'The answer needs more depth or clarity.'}"\n\n`;
+    llmUserPrompt += `Your primary task is to formulate a follow-up question of the suggested type (${suggestedFollowUpType}) that directly targets the core issues outlined in the 'Reason for Insufficiency' above. This feedback should be the main guide for your question.\n\n`;
+    
+    llmUserPrompt += `Strategic Lenses for Addressing the Analytical Feedback (apply one relevant to the feedback and suggested type ${suggestedFollowUpType}):
 `;
-    llmUserPrompt += `1.  **Clarification:** If a specific part of the answer is ambiguous, ask for clarification on *that part*. (e.g., "When you mentioned 'X', what did you specifically mean by that?")\n`;
-    llmUserPrompt += `2.  **Probing for Reasons/Motivations:** Ask *why* they hold that view or made that statement. (e.g., "What led you to that conclusion about 'Y'?")\n`;
-    llmUserPrompt += `3.  **Exploring Impact/Consequences:** Ask about the effects or results of what they described. (e.g., "What was the primary impact of 'Z' on the outcome?")\n`;
-    llmUserPrompt += `4.  **Seeking Elaboration on Depth/Insight:** If the answer is superficial, ask for a deeper dive into a key aspect. (e.g., "Could you elaborate on the most critical factor in 'A'?")\n`;
-    llmUserPrompt += `5.  **Considering Alternatives/Trade-offs:** If appropriate, ask about other options or why the stated one was chosen. (e.g., "Were other approaches like 'B' considered, and if so, why was this one preferred?")\n`;
+    llmUserPrompt += `1.  **Targeted Clarification:** If the \`analyticalFeedback\` indicates ambiguity in a specific part of their answer (e.g., 'the term X was unclear'), ask for clarification *specifically on that term or concept*. Example for TEXT: "[TEXT] When you mentioned 'X', what did you specifically mean in that context?"\n`;
+    llmUserPrompt += `2.  **Uncovering Rationale/Assumptions:** If the \`analyticalFeedback\` suggests a missing 'why' or unstated assumptions (e.g., 'the reasoning behind Y was not provided'), prompt for the underlying justification. Example for TEXT: "[TEXT] What were the key reasons or assumptions that led you to the conclusion about 'Y'?"\n`;
+    llmUserPrompt += `3.  **Exploring Impact/Consequences:** If the \`analyticalFeedback\` points to unaddressed effects (e.g., 'the potential consequences of Z were not discussed'), ask about these. Example for TEXT: "[TEXT] What do you foresee as the main impacts or consequences if 'Z' were to happen?"\n`;
+    llmUserPrompt += `4.  **Quantifying Specifics (for YES_NO or RATING_1_5):** If the \`analyticalFeedback\` highlights a need for a more precise stance or measurement (e.g., 'level of agreement is unclear' or 'priority is not specified'). Example for YES_NO: "[YES_NO] Is it fair to say that 'A' is the highest priority for you in this context?" Example for RATING_1_5: "[RATING_1_5] On a scale of 1 to 5, how would you rate your agreement with statement 'B'?"\n`;
     llmUserPrompt += `\n`;
 
     if (similarAnswersContext && similarAnswersContext.length > 0) {
-      llmUserPrompt += `For additional context, here are some relevant past answers from other participants on similar topics (higher score means more similar):\n`;
+      llmUserPrompt += `For additional context, here are some relevant past answers from other participants on similar topics. If the \`analyticalFeedback\` relates to a point where comparison would be insightful, consider asking the participant to relate their statement (especially the insufficient part) to these other perspectives:\n`;
       for (const ctx of similarAnswersContext) {
         const questionPreview = ctx.questionText.length > 50 ? `${ctx.questionText.substring(0, 47)}...` : ctx.questionText;
         const answerPreview = String(ctx.responseText).length > 70 ? `${String(ctx.responseText).substring(0, 67)}...` : String(ctx.responseText);
         llmUserPrompt += `- Regarding a question like "${questionPreview}", a participant (Role: ${ctx.participantRole}) answered: "${answerPreview}" (Similarity: ${ctx.similarityScore})\n`;
       }
-      llmUserPrompt += 'Please consider this context when formulating your follow-up question to potentially highlight gaps, common themes, or ask for differentiation from these other answers.\n';
+      llmUserPrompt += 'Please leverage this context if it helps in formulating a follow-up that addresses the analytical feedback by encouraging comparison or differentiation.\n';
     }
 
-    llmUserPrompt += `\nBased on all the above, and focusing on the analytical feedback provided, generate a *single, concise, focused, and insightful* follow-up question for the participant. Your response *must* start with the prefix \`${requiredPrefix}\` (as the required question type is ${suggestedFollowUpType}).`;
+    llmUserPrompt += `\nBased on all the above, and *critically focusing on the provided analytical feedback* and the required question type (${suggestedFollowUpType}), generate a *single, concise, focused, and insightful* follow-up question. Your response *must* start with the prefix \`${requiredPrefix}\` (as the required question type is ${suggestedFollowUpType}).`;
 
     const messages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
         { role: 'system', content: llmSystemPrompt },
