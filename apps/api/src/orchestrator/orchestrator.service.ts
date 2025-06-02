@@ -48,7 +48,7 @@ interface FormattedSimilarAnswerContext {
 export class OrchestratorService {
   private readonly logger = new Logger(OrchestratorService.name);
   private readonly MAX_FOLLOW_UPS = 3;
-  private readonly MAX_PROCESS_ANSWER_RETRIES = 3;
+  private readonly MAX_PROCESS_ANSWER_RETRIES = 10;
 
   constructor(
     private readonly sessionCacheService: SessionCacheService,
