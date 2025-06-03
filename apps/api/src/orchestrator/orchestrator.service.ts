@@ -301,8 +301,8 @@ You must generate a follow-up question of type: ${suggestedFollowUpType}.\n`;
     if (similarAnswersContext && similarAnswersContext.length > 0) {
       llmUserPrompt += `For additional context, here are some relevant past answers from other participants on similar topics. If the \`analyticalFeedback\` relates to a point where comparison would be insightful, consider asking the participant to relate their statement (especially the insufficient part) to these other perspectives:\n`;
       for (const ctx of similarAnswersContext) {
-        const questionPreview = ctx.questionText.length > 50 ? `${ctx.questionText.substring(0, 47)}...` : ctx.questionText;
-        const answerPreview = String(ctx.responseText).length > 70 ? `${String(ctx.responseText).substring(0, 67)}...` : String(ctx.responseText);
+        const questionPreview = ctx.questionText.length > 200 ? `${ctx.questionText.substring(0, 197)}...` : ctx.questionText;
+        const answerPreview = String(ctx.responseText).length > 200 ? `${String(ctx.responseText).substring(0, 197)}...` : String(ctx.responseText);
         llmUserPrompt += `- Regarding a question like "${questionPreview}", a participant (Role: ${ctx.participantRole}) answered: "${answerPreview}" (Similarity: ${ctx.similarityScore})\n`;
       }
       llmUserPrompt += 'Please leverage this context if it helps in formulating a follow-up that addresses the analytical feedback by encouraging comparison or differentiation.\n';
